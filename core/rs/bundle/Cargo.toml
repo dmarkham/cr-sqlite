@@ -25,6 +25,7 @@ panic = "abort"
 panic = "abort"
 
 [features]
+omit_eh_personality = []
 test = ["crsql_core/test"]
 libsql = ["crsql_core/libsql"]
 loadable_extension = [

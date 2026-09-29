@@ -20,6 +20,7 @@ panic = "abort"
 panic = "abort"
 
 [features]
+omit_eh_personality = ["crsql_bundle/omit_eh_personality"]
 libsql = ["crsql_bundle/libsql"]
 test = [
   "crsql_bundle/test"

@@ -183,7 +183,7 @@ $(rs_lib_dbg_static_cpy): FORCE $(dbg_prefix)
 
 $(rs_lib_static_cpy): export CRSQLITE_COMMIT_SHA = $(shell git rev-parse HEAD)
 $(rs_lib_static_cpy): FORCE $(prefix)
-	cd ./rs/$(bundle) && cargo rustc $(RS_TARGET) --release --features static,omit_load_extension$(libsql_feature) $(rs_build_flags)
+	cd ./rs/$(bundle) && cargo rustc $(RS_TARGET) --release --features static,omit_load_extension$(libsql_feature)$(rs_extra_features) $(rs_build_flags)
 	cp $(rs_lib_static) $(rs_lib_static_cpy)
 
 $(rs_lib_loadable_cpy): export CRSQLITE_COMMIT_SHA = $(shell git rev-parse HEAD)

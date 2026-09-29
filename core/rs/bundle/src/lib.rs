@@ -37,7 +37,8 @@ fn panic(info: &PanicInfo) -> ! {
     core::intrinsics::abort();
 }
 
-#[cfg(not(target_family = "wasm"))]
+// A Rust program that links the static library has its own.
+#[cfg(not(any(target_family = "wasm", feature = "omit_eh_personality")))]
 #[lang = "eh_personality"]
 extern "C" fn eh_personality() {}
 
