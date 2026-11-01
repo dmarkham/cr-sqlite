@@ -51,7 +51,7 @@ mod util;
 use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::ToString;
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use core::ffi::c_char;
 use core::mem;
 use core::ptr::null_mut;
@@ -1016,14 +1016,10 @@ unsafe extern "C" fn x_crsql_commit_alter(
         let error_str = if !err_msg.is_null() {
             let msg = unsafe { CStr::from_ptr(err_msg).to_string_lossy().into_owned() };
             sqlite::free(err_msg as *mut c_void);
-            Cow::Owned(msg)
+            msg
         } else {
             // nothing more specific was recorded, fall back to the connection's last error
-            Cow::Owned(format!(
-                "{} (code {})",
-                db.errmsg().unwrap_or_default(),
-                rc
-            ))
+            format!("{} (code {})", db.errmsg().unwrap_or_default(), rc)
         };
         ctx.result_error(&format!(
             "failed compacting tables post alteration: {}",
