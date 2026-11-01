@@ -221,6 +221,33 @@ static void testFetchPragmaDataVersion() {
   printf("\t\e[0;32mSuccess\e[0m\n");
 }
 
+// A merge-equal-values row of the wrong type must neither brick the
+// connection nor leak the config statement (which would make
+// sqlite3_close return SQLITE_BUSY).
+static void testBrokenConfigSetting() {
+  printf("BrokenConfigSetting\n");
+  sqlite3 *db;
+  int rc = sqlite3_open(":memory:", &db);
+  assert(rc == SQLITE_OK);
+  rc = sqlite3_exec(db,
+                    "INSERT OR REPLACE INTO crsql_master VALUES "
+                    "('config.merge-equal-values', 'true')",
+                    0, 0, 0);
+  assert(rc == SQLITE_OK);
+
+  crsql_ExtData *pExtData = crsql_newExtData(db);
+  assert(pExtData != 0);
+  assert(pExtData->mergeEqualValues == 0);
+  crsql_finalize(pExtData);
+  crsql_freeExtData(pExtData);
+
+  rc = sqlite3_exec(db, "SELECT crsql_finalize()", 0, 0, 0);
+  assert(rc == SQLITE_OK);
+  rc = sqlite3_close(db);
+  assert(rc == SQLITE_OK);
+  printf("\t\e[0;32mSuccess\e[0m\n");
+}
+
 void crsqlExtDataTestSuite() {
   printf("\e[47m\e[1;30mSuite: crsql_ExtData\e[0m\n");
   textNewExtData();
@@ -228,4 +255,5 @@ void crsqlExtDataTestSuite() {
   testFinalize();
   testFetchPragmaSchemaVersion();
   testFetchPragmaDataVersion();
+  testBrokenConfigSetting();
 }
