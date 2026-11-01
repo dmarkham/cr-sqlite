@@ -66,7 +66,7 @@ pub struct TableInfo {
     insert_clock_stmt: RefCell<Option<ManagedStmt>>,
     update_clock_stmt: RefCell<Option<ManagedStmt>>,
     mark_locally_deleted_stmt: RefCell<Option<ManagedStmt>>,
-    move_non_sentinels_stmt: RefCell<Option<ManagedStmt>>,
+    move_non_pk_col_stmt: RefCell<Option<ManagedStmt>>,
     mark_locally_created_stmt: RefCell<Option<ManagedStmt>>,
     maybe_mark_locally_reinserted_stmt: RefCell<Option<ManagedStmt>>,
     cl_cache: BTreeMap<i64, i64>,
@@ -503,28 +503,11 @@ impl TableInfo {
         Ok(self.mark_locally_deleted_stmt.try_borrow()?)
     }
 
-    #[allow(dead_code)]
-    pub fn get_move_non_sentinels_stmt(
-        &self,
-        db: *mut sqlite3,
-    ) -> Result<Ref<Option<ManagedStmt>>, ResultCode> {
-        if self.move_non_sentinels_stmt.try_borrow()?.is_none() {
-            let sql = format!(
-              "UPDATE OR REPLACE \"{table_name}__crsql_clock\" SET key = ? WHERE key = ? AND col_name != '{sentinel}'",
-              table_name = crate::util::escape_ident(&self.tbl_name),
-              sentinel = crate::c::DELETE_SENTINEL,
-            );
-            let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
-            *self.move_non_sentinels_stmt.try_borrow_mut()? = Some(ret);
-        }
-        Ok(self.move_non_sentinels_stmt.try_borrow()?)
-    }
-
     pub fn get_move_non_pk_col_stmt(
         &self,
         db: *mut sqlite3,
     ) -> Result<Ref<Option<ManagedStmt>>, ResultCode> {
-        if self.move_non_sentinels_stmt.try_borrow()?.is_none() {
+        if self.move_non_pk_col_stmt.try_borrow()?.is_none() {
             // Incrementing col_version is especially important for the case where we
             // are updating to a currently existing pk, so that the columns
             // from the old pk can override the ones from the new at a node
@@ -542,9 +525,9 @@ impl TableInfo {
                 table_name = crate::util::escape_ident(&self.tbl_name),
             );
             let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
-            *self.move_non_sentinels_stmt.try_borrow_mut()? = Some(ret);
+            *self.move_non_pk_col_stmt.try_borrow_mut()? = Some(ret);
         }
-        Ok(self.move_non_sentinels_stmt.try_borrow()?)
+        Ok(self.move_non_pk_col_stmt.try_borrow()?)
     }
 
     pub fn get_mark_locally_created_stmt(
@@ -737,7 +720,7 @@ impl TableInfo {
         stmt.take();
         let mut stmt = self.mark_locally_deleted_stmt.try_borrow_mut()?;
         stmt.take();
-        let mut stmt = self.move_non_sentinels_stmt.try_borrow_mut()?;
+        let mut stmt = self.move_non_pk_col_stmt.try_borrow_mut()?;
         stmt.take();
         let mut stmt = self.mark_locally_created_stmt.try_borrow_mut()?;
         stmt.take();
@@ -1043,7 +1026,7 @@ pub fn pull_table_info(
         zero_clocks_on_resurrect_stmt: RefCell::new(None),
 
         mark_locally_deleted_stmt: RefCell::new(None),
-        move_non_sentinels_stmt: RefCell::new(None),
+        move_non_pk_col_stmt: RefCell::new(None),
         mark_locally_created_stmt: RefCell::new(None),
         maybe_mark_locally_reinserted_stmt: RefCell::new(None),
         combo_insert_clock_stmt: RefCell::new(None),
