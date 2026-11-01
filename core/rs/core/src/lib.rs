@@ -977,6 +977,13 @@ unsafe extern "C" fn x_crsql_commit_alter(
     let mut err_msg = null_mut();
     let db = ctx.db_handle();
 
+    // crsql_begin_alter's alter_crr savepoint is optional, so take one of our own to undo a
+    // partial commit_alter.
+    if db.exec_safe("SAVEPOINT commit_alter").is_err() {
+        ctx.result_error("failed to start commit_alter savepoint");
+        return;
+    }
+
     // The schema_version alone can't tell this alteration apart from an earlier one that was
     // rolled back to the same savepoint, so always re-pull the table infos.
     (*ext_data).pragmaSchemaVersionForTableInfos = -1;
@@ -1020,8 +1027,10 @@ unsafe extern "C" fn x_crsql_commit_alter(
     };
 
     let rc = if rc == ResultCode::OK as c_int {
-        db.exec_safe("RELEASE alter_crr")
-            .unwrap_or(ResultCode::ERROR) as c_int
+        match db.exec_safe("RELEASE commit_alter") {
+            Ok(_) => release_alter_crr(db),
+            Err(rc) => rc as c_int,
+        }
     } else {
         rc
     };
@@ -1039,9 +1048,26 @@ unsafe extern "C" fn x_crsql_commit_alter(
             error_str
         ));
         sqlite::result_error_code(ctx, rc);
-        // undo to the savepoint crsql_begin_alter opened (if any), not the caller's transaction
+        // undo our own work, then the alteration since the savepoint crsql_begin_alter opened
+        // (if any), never the caller's transaction
+        let _ = db.exec_safe("ROLLBACK TO commit_alter; RELEASE commit_alter;");
         let _ = db.exec_safe("ROLLBACK TO alter_crr; RELEASE alter_crr;");
         return;
+    }
+}
+
+/// Releases the savepoint crsql_begin_alter opened. crsql_commit_alter may be
+/// used without crsql_begin_alter, in which case there is none.
+fn release_alter_crr(db: *mut sqlite::sqlite3) -> c_int {
+    match db.exec_safe("RELEASE alter_crr") {
+        Ok(_) => ResultCode::OK as c_int,
+        Err(_) if db
+            .errmsg()
+            .map_or(false, |msg| msg.starts_with("no such savepoint")) =>
+        {
+            ResultCode::OK as c_int
+        }
+        Err(rc) => rc as c_int,
     }
 }
 
