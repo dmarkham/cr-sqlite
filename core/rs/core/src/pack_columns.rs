@@ -92,7 +92,7 @@ fn num_bytes_needed_i32(val: i32) -> u8 {
         return 3;
     } else if val & 0x0000FF00 != 0 {
         return 2;
-    } else if val * 0x000000FF != 0 {
+    } else if val & 0x000000FF != 0 {
         return 1;
     } else {
         return 0;
@@ -125,6 +125,9 @@ pub enum ColumnValue {
 pub fn unpack_columns(data: &[u8]) -> Result<Vec<ColumnValue>, ResultCode> {
     let mut ret = vec![];
     let mut buf = data;
+    if !buf.has_remaining() {
+        return Err(ResultCode::ABORT);
+    }
     let num_columns = buf.get_u8();
 
     for _i in 0..num_columns {
@@ -134,13 +137,20 @@ pub fn unpack_columns(data: &[u8]) -> Result<Vec<ColumnValue>, ResultCode> {
         let column_type_and_maybe_intlen = buf.get_u8();
         let column_type = ColumnType::from_u8(column_type_and_maybe_intlen & 0x07);
         let intlen = (column_type_and_maybe_intlen >> 3 & 0xFF) as usize;
+        // the packer never writes more than 8 bytes for an integer (4 for a length).
+        // `get_int`/`get_uint` panic on anything over 8.
+        if intlen > 8 {
+            return Err(ResultCode::ABORT);
+        }
 
         match column_type {
             Some(ColumnType::Blob) => {
                 if buf.remaining() < intlen {
                     return Err(ResultCode::ABORT);
                 }
-                let len = buf.get_int(intlen) as usize;
+                // lengths are never negative; read unsigned like text so lengths with the
+                // high bit of their top byte set don't get sign extended.
+                let len = buf.get_uint(intlen) as usize;
                 if buf.remaining() < len {
                     return Err(ResultCode::ABORT);
                 }

@@ -487,7 +487,17 @@ unsafe fn merge_insert(
     let tbl_info_index = tbl_info_index.unwrap();
 
     let tbl_info = &mut tbl_infos[tbl_info_index];
-    let unpacked_pks = unpack_columns(insert_pks.blob())?;
+    let unpacked_pks = match unpack_columns(insert_pks.blob()) {
+        Ok(pks) if pks.len() == tbl_info.pks.len() => pks,
+        _ => {
+            let err = CString::new(format!(
+                "crsql - malformed primary key for table {}",
+                insert_tbl
+            ))?;
+            *errmsg = err.into_raw();
+            return Err(ResultCode::ERROR);
+        }
+    };
 
     // Get or create key as the first thing we do.
     // We'll need the key for all later operations.
