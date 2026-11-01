@@ -61,7 +61,7 @@ use backfill::*;
 use c::{crsql_freeExtData, crsql_initSiteIdExt, crsql_newExtData};
 use config::{crsql_config_get, crsql_config_set};
 use core::ffi::{c_int, c_void, CStr};
-use create_crr::create_crr;
+use create_crr::{check_schema_is_main, create_crr};
 use db_version::{crsql_next_db_version, crsql_peek_next_db_version, insert_db_version};
 use is_crr::*;
 use local_writes::after_delete::x_crsql_after_delete;
@@ -815,12 +815,15 @@ unsafe extern "C" fn x_crsql_begin_alter(
     }
 
     let args = sqlite::args!(argc, argv);
-    // TODO: use schema name!
-    let (_schema_name, table_name) = if argc == 2 {
+    let (schema_name, table_name) = if argc == 2 {
         (args[0].text(), args[1].text())
     } else {
         ("main\0", args[0].text())
     };
+    if let Err(msg) = check_schema_is_main(schema_name) {
+        ctx.result_error(&msg);
+        return;
+    }
 
     let db = ctx.db_handle();
     let rc = db.exec_safe("SAVEPOINT alter_crr");
@@ -856,6 +859,11 @@ unsafe extern "C" fn x_crsql_commit_alter(
     } else {
         ("main\0", args[0].text())
     };
+
+    if let Err(msg) = check_schema_is_main(schema_name) {
+        ctx.result_error(&msg);
+        return;
+    }
 
     let non_destructive = if argc >= 3 { args[2].int() == 1 } else { false };
 

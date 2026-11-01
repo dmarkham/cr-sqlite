@@ -447,7 +447,10 @@ def test_non_main_schema_is_rejected():
     with pytest.raises(sqlite3.Error, match="schema"):
         c.execute("SELECT crsql_as_crr('aux', 't')")
     with pytest.raises(sqlite3.Error, match="schema"):
+        c.execute("SELECT crsql_begin_alter('aux', 't')")
+    with pytest.raises(sqlite3.Error, match="schema"):
         c.execute("SELECT crsql_commit_alter('aux', 't')")
+    assert not c.in_transaction
     assert c.execute(
         "SELECT count(*) FROM main.sqlite_master WHERE name LIKE 't%'").fetchone()[0] == 0
 
