@@ -80,7 +80,10 @@ fn did_cid_win(
     let col_val_stmt_ref = tbl_info.get_col_value_stmt(db, col_name)?;
     let col_val_stmt = col_val_stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
 
-    let bind_result = bind_package_to_stmt(col_val_stmt.stmt, &unpacked_pks, 0);
+    // ?1 is the incoming value, the pks follow.
+    let bind_result = col_val_stmt
+        .bind_value(1, insert_val)
+        .and_then(|_| bind_package_to_stmt(col_val_stmt.stmt, &unpacked_pks, 1));
     if let Err(rc) = bind_result {
         reset_cached_stmt(col_val_stmt.stmt)?;
         return Err(rc);
@@ -90,6 +93,8 @@ fn did_cid_win(
     match step_result {
         Ok(ResultCode::ROW) => {
             let local_value = col_val_stmt.column_value(0)?;
+            // compare the incoming value as the column would store it, not as sent.
+            let insert_val = col_val_stmt.column_value(1)?;
             let ret = crsql_compare_sqlite_values(insert_val, local_value);
             reset_cached_stmt(col_val_stmt.stmt)?;
             if ret == 0 && unsafe { (*ext_data).mergeEqualValues == 1 } {

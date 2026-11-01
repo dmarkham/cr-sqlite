@@ -776,15 +776,47 @@ pub struct ColumnInfo {
 }
 
 impl ColumnInfo {
+    fn affinity(
+        &self,
+        tbl_info: &TableInfo,
+        db: *mut sqlite3,
+    ) -> Result<crate::compare_values::Affinity, ResultCode> {
+        let stmt =
+            db.prepare_v2("SELECT \"type\" FROM pragma_table_info(?1) WHERE \"name\" = ?2")?;
+        stmt.bind_text(1, &tbl_info.tbl_name, sqlite::Destructor::STATIC)?;
+        stmt.bind_text(2, &self.name, sqlite::Destructor::STATIC)?;
+        let decl_type = if stmt.step()? == ResultCode::ROW {
+            stmt.column_text(0)?.to_string()
+        } else {
+            String::new()
+        };
+        // pragma_table_list needs sqlite 3.37; older versions have no STRICT tables anyway.
+        let strict = db
+            .prepare_v2("SELECT \"strict\" FROM pragma_table_list(?1)")
+            .and_then(|stmt| {
+                stmt.bind_text(1, &tbl_info.tbl_name, sqlite::Destructor::STATIC)?;
+                Ok(stmt.step()? == ResultCode::ROW && stmt.column_int(0) != 0)
+            })
+            .unwrap_or(false);
+        Ok(crate::compare_values::affinity_of_decl_type(
+            &decl_type, strict,
+        ))
+    }
+
     fn get_curr_value_stmt(
         &self,
         tbl_info: &TableInfo,
         db: *mut sqlite3,
     ) -> Result<Ref<Option<ManagedStmt>>, ResultCode> {
         if self.curr_value_stmt.try_borrow()?.is_none() {
+            // ?1 is the incoming value; the second result column is that value with this
+            // column's affinity applied so it can be compared with the stored one.
+            // The pks bind from ?2.
+            let affinity = self.affinity(tbl_info, db)?;
             let sql = format!(
-                "SELECT \"{col_name}\" FROM \"{table_name}\" WHERE {pk_where_list}",
+                "SELECT \"{col_name}\", {converted} FROM \"{table_name}\" WHERE {pk_where_list}",
                 col_name = crate::util::escape_ident(&self.name),
+                converted = crate::compare_values::affinity_conversion_sql(affinity, "?1"),
                 table_name = crate::util::escape_ident(&tbl_info.tbl_name),
                 pk_where_list = crate::util::where_list(&tbl_info.pks, None)?,
             );
