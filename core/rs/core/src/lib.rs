@@ -139,7 +139,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_automigrate",
             -1,
-            sqlite::UTF8,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
             None,
             Some(crsql_automigrate),
             None,
@@ -171,7 +171,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_as_table",
             1,
-            sqlite::UTF8,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
             None,
             Some(crsql_as_table),
             None,
@@ -208,17 +208,35 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         *sync_bit_ptr = 0;
     }
     // Function to allow us to disable triggers when syncing remote changes
-    // to base tables.
+    // to base tables. Setting the bit, crsql_internal_sync_bit(x), must not
+    // be reachable from schema (views, triggers); reading it,
+    // crsql_internal_sync_bit(), is what the crr triggers do. The setter owns
+    // sync_bit_ptr.
     let rc = db
         .create_function_v2(
             "crsql_internal_sync_bit",
-            -1,
-            sqlite::UTF8 | sqlite::INNOCUOUS,
+            1,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
             Some(sync_bit_ptr as *mut c_void),
             Some(x_crsql_sync_bit),
             None,
             None,
             Some(crsql_sqlite_free),
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        return init_failed(db, false);
+    }
+    let rc = db
+        .create_function_v2(
+            "crsql_internal_sync_bit",
+            0,
+            sqlite::UTF8 | sqlite::INNOCUOUS,
+            Some(sync_bit_ptr as *mut c_void),
+            Some(x_crsql_sync_bit),
+            None,
+            None,
+            None,
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
@@ -262,7 +280,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_update_site_id",
             2,
-            sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
+            sqlite::UTF8 | sqlite::INNOCUOUS,
             Some(ext_data as *mut c_void),
             Some(x_crsql_update_site_id),
             None,
@@ -392,7 +410,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_get_seq",
             0,
-            sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
+            sqlite::UTF8 | sqlite::INNOCUOUS,
             Some(ext_data as *mut c_void),
             Some(x_crsql_get_seq),
             None,
@@ -408,7 +426,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_as_crr",
             -1,
-            sqlite::UTF8 | sqlite::DETERMINISTIC,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
             None,
             Some(x_crsql_as_crr),
             None,
@@ -424,7 +442,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_set_ts",
             1,
-            sqlite::UTF8 | sqlite::DETERMINISTIC,
+            sqlite::UTF8,
             Some(ext_data as *mut c_void),
             Some(x_crsql_set_ts),
             None,
@@ -440,7 +458,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     if let Err(_) = db.create_function_v2(
         "crsql_cache_site_ordinal",
         1,
-        sqlite::UTF8 | sqlite::DETERMINISTIC,
+        sqlite::UTF8,
         Some(ext_data as *mut c_void),
         Some(x_crsql_cache_site_ordinal),
         None,
@@ -454,7 +472,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     if let Err(_) = db.create_function_v2(
         "crsql_cache_pk_cl",
         2,
-        sqlite::UTF8 | sqlite::DETERMINISTIC,
+        sqlite::UTF8,
         Some(ext_data as *mut c_void),
         Some(x_crsql_cache_pk_cl),
         None,
@@ -468,7 +486,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     if let Err(_) = db.create_function_v2(
         "crsql_cache_db_version",
         1,
-        sqlite::UTF8 | sqlite::DETERMINISTIC,
+        sqlite::UTF8,
         Some(ext_data as *mut c_void),
         Some(x_crsql_cache_db_version),
         None,
@@ -482,7 +500,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_set_db_version",
             -1,
-            sqlite::UTF8 | sqlite::DETERMINISTIC,
+            sqlite::UTF8,
             Some(ext_data as *mut c_void),
             Some(x_crsql_set_db_version),
             None,
@@ -498,7 +516,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_get_ts",
             -1,
-            sqlite::UTF8 | sqlite::DETERMINISTIC,
+            sqlite::UTF8,
             Some(ext_data as *mut c_void),
             Some(x_crsql_get_ts),
             None,
@@ -642,7 +660,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         .create_function_v2(
             "crsql_config_get",
             1,
-            sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
+            sqlite::UTF8 | sqlite::INNOCUOUS,
             Some(ext_data as *mut c_void),
             Some(crsql_config_get),
             None,
@@ -689,7 +707,8 @@ const CORE_FUNCTIONS: &[(&str, c_int)] = &[
     ("crsql_automigrate", -1),
     ("crsql_pack_columns", -1),
     ("crsql_as_table", 1),
-    ("crsql_internal_sync_bit", -1),
+    ("crsql_internal_sync_bit", 0),
+    ("crsql_internal_sync_bit", 1),
     ("crsql_sha", 0),
     ("crsql_version", 0),
     ("crsql_as_crr", -1),

@@ -325,8 +325,8 @@ def test_function_flags():
                  "crsql_set_ts('1')", "crsql_as_crr('x')",
                  "crsql_set_db_version(x'00', 1)"]:
         c.execute("DROP TABLE IF EXISTS g")
-        c.execute(f"CREATE TABLE g (a, b AS ({expr}))")
         with pytest.raises(Exception):
+            c.execute(f"CREATE TABLE g (a, b AS ({expr}))")
             c.execute("INSERT INTO g (a) VALUES (1)")
     close(c)
 
