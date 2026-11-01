@@ -12,9 +12,11 @@
 #define USER_SPACE 1
 #define ROWID_SLAB_SIZE 10000000000000
 
+// GLOB rather than LIKE: `_` is a LIKE wildcard (so `my_crsql_clock` matched)
+// and LIKE is case-insensitive.
 #define CLOCK_TABLES_SELECT                                                  \
-  "SELECT tbl_name FROM sqlite_master WHERE type='table' AND tbl_name LIKE " \
-  "'%__crsql_clock'"
+  "SELECT tbl_name FROM sqlite_master WHERE type='table' AND tbl_name GLOB " \
+  "'*__crsql_clock'"
 
 #define SET_SYNC_BIT "SELECT crsql_internal_sync_bit(1)"
 #define CLEAR_SYNC_BIT "SELECT crsql_internal_sync_bit(0)"

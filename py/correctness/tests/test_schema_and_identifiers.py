@@ -271,23 +271,32 @@ def test_automigrate_detects_index_column_change():
     close(c)
 
 
-def test_automigrate_drop_crr_and_clock_table_discovery():
+def test_automigrate_drop_crr_and_clock_table_discovery(tmp_path):
     """automigrate.rs drop_tables left a__crsql_clock / a__crsql_pks behind; the
     `LIKE '%__crsql_clock'` discovery in tableinfo.rs matched user tables and could slice a
     UTF-8 name mid-character; a clock table without its base table made every crsql_changes
     read ABORT."""
-    c = conn()
+    path = str(tmp_path / "drop.db")
+    c = conn(path)
     c.execute("CREATE TABLE a (id PRIMARY KEY NOT NULL, x)")
     c.execute("SELECT crsql_as_crr('a')")
     c.execute("CREATE TABLE b (id PRIMARY KEY NOT NULL, x)")
     c.execute("SELECT crsql_as_crr('b')")
-    c.execute("INSERT INTO a VALUES (1, 1)")
     c.execute("INSERT INTO b VALUES (1, 1)")
+    c.execute("INSERT INTO a VALUES (1, 1)")
+    c.execute("CREATE TABLE my_crsql_x (id)")
+    db_version = c.execute("SELECT crsql_db_version()").fetchone()[0]
     c.execute("SELECT crsql_automigrate(?)",
               ("CREATE TABLE IF NOT EXISTS b (id PRIMARY KEY NOT NULL, x);",))
     names = [r[0] for r in c.execute("SELECT name FROM sqlite_master")]
     assert not [n for n in names if n.startswith("a__crsql")]
+    # only matched the reserved `%__crsql_%` pattern through the `_` wildcard
+    assert "my_crsql_x" not in names
     assert c.execute("SELECT [table], cid FROM crsql_changes").fetchall() == [('b', 'x')]
+    close(c)
+    # dropping a's clock table must not take the db_version backwards
+    c = conn(path)
+    assert c.execute("SELECT crsql_db_version()").fetchone()[0] == db_version
     close(c)
 
     # user table that only matches `%__crsql_clock` through the `_` wildcard

@@ -948,11 +948,17 @@ fn pull_all_table_infos(
 
     let mut ret = vec![];
     for name in clock_table_names {
-        ret.push(pull_table_info(
-            db,
-            &name[0..(name.len() - "__crsql_clock".len())],
-            err,
-        )?)
+        let table_name = match name.strip_suffix("__crsql_clock") {
+            Some(table_name) => table_name,
+            None => continue,
+        };
+        let table_info = pull_table_info(db, table_name, err)?;
+        // A clock table whose base table was dropped (or that never belonged to a CRR) has no
+        // primary key to track. Skip it so it doesn't break crsql_changes for every other table.
+        if table_info.pks.is_empty() {
+            continue;
+        }
+        ret.push(table_info)
     }
 
     Ok(ret)

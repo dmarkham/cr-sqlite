@@ -126,11 +126,11 @@ fn migrate_to(
     // TODO: why not HashSet?
     let mut mem_tables: BTreeSet<String> = BTreeSet::new();
 
+    // `_` is a LIKE wildcard, escape it so only the reserved names are skipped
     let sql = "SELECT name FROM sqlite_master WHERE type = 'table'
-        AND name NOT LIKE 'sqlite_%'
-        AND name NOT LIKE 'crsql_%'
-        AND name NOT LIKE '__crsql_%'
-        AND name NOT LIKE '%__crsql_%'";
+        AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+        AND name NOT LIKE 'crsql\\_%' ESCAPE '\\'
+        AND name NOT LIKE '%\\_\\_crsql\\_%' ESCAPE '\\'";
     let fetch_mem_tables = mem_db.prepare_v2(sql)?;
     let fetch_local_tables = local_db.prepare_v2(sql)?;
 
@@ -184,10 +184,15 @@ fn strip_crr_statements(schema: &str) -> String {
 
 fn drop_tables(local_db: *mut sqlite3, tables: Vec<String>) -> Result<ResultCode, ResultCode> {
     for table in tables {
+        let is_a_crr = crate::is_crr(local_db, &table)?;
         local_db.exec_safe(&format!(
             "DROP TABLE \"{table}\"",
             table = crate::util::escape_ident(&table)
         ))?;
+        if is_a_crr {
+            // the crr triggers went with the table, the clock and pk lookaside tables did not
+            crate::remove_crr_clock_table_if_exists(local_db, &table)?;
+        }
     }
 
     Ok(ResultCode::OK)
