@@ -47,9 +47,12 @@ pub fn backfill_table(
         Err(e) => Err(e),
     };
 
+    // On failure the rollback is best effort: if it fails too (e.g. the error
+    // already ended the transaction, taking the savepoint with it) the
+    // original error is the one to report.
     if let Err(e) = result {
         if !no_tx {
-            db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;")?;
+            let _ = db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;");
         }
 
         return Err(e);
@@ -57,7 +60,7 @@ pub fn backfill_table(
 
     if let Err(e) = backfill_missing_columns(db, table, pk_cols, non_pk_cols, is_commit_alter) {
         if !no_tx {
-            db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;")?;
+            let _ = db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;");
         }
 
         return Err(e);
