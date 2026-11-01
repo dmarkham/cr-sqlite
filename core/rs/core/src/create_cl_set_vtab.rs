@@ -165,7 +165,9 @@ extern "C" fn disconnect(vtab: *mut sqlite::vtab) -> c_int {
 }
 
 extern "C" fn destroy(vtab: *mut sqlite::vtab) -> c_int {
-    let tab = unsafe { Box::from_raw(vtab.cast::<CLSetTab>()) };
+    // Only borrow the vtab here: if a DROP fails, SQLite keeps the vtab and calls xDisconnect
+    // on it later, which frees it.
+    let tab = unsafe { &*(vtab.cast::<CLSetTab>()) };
     let ret = tab.db.exec_safe(&format!(
         "DROP TABLE \"{db_name}\".\"{table_name}\";
         DROP TABLE \"{db_name}\".\"{table_name}__crsql_clock\";
@@ -174,7 +176,11 @@ extern "C" fn destroy(vtab: *mut sqlite::vtab) -> c_int {
         db_name = crate::util::escape_ident(&tab.db_name)
     ));
     match ret {
-        Err(rc) | Ok(rc) => rc as c_int,
+        Ok(rc) => {
+            unsafe { drop(Box::from_raw(vtab.cast::<CLSetTab>())) };
+            rc as c_int
+        }
+        Err(rc) => rc as c_int,
     }
 }
 
@@ -207,7 +213,8 @@ extern "C" fn next(_cursor: *mut sqlite::vtab_cursor) -> c_int {
 }
 
 extern "C" fn eof(_cursor: *mut sqlite::vtab_cursor) -> c_int {
-    ResultCode::OK as c_int
+    // the schema vtab has no rows to scan
+    1
 }
 
 extern "C" fn column(
