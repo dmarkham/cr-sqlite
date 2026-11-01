@@ -300,7 +300,7 @@ pub unsafe fn get_or_set_site_ordinal(
             }
         }
         Err(rc) => {
-            reset_cached_stmt((*ext_data).pSetSiteIdOrdinalStmt)?;
+            reset_cached_stmt((*ext_data).pSelectSiteIdOrdinalStmt)?;
             return Err(rc);
         }
     };
