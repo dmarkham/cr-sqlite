@@ -428,16 +428,20 @@ fn maybe_recreate_index(
         return Err(ResultCode::CONSTRAINT);
     }
 
-    if fetch_is_unique_mem.column_int(0) != fetch_is_unique_local.column_int(0) {
-        // We cannot alter a table against which we have open statements
-        // drop to finalize those statements
-        drop(fetch_is_unique_mem);
-        drop(fetch_is_unique_local);
+    let uniqueness_changed =
+        fetch_is_unique_mem.column_int(0) != fetch_is_unique_local.column_int(0);
+    // We cannot alter a table against which we have open statements
+    // drop to finalize those statements
+    drop(fetch_is_unique_mem);
+    drop(fetch_is_unique_local);
+    if uniqueness_changed {
         return recreate_index(local_db, idx);
     }
 
     let fetch_idx_cols_mem = mem_db.prepare_v2(IDX_COLS_SQL)?;
+    fetch_idx_cols_mem.bind_text(1, idx, sqlite::Destructor::STATIC)?;
     let fetch_idx_cols_local = local_db.prepare_v2(IDX_COLS_SQL)?;
+    fetch_idx_cols_local.bind_text(1, idx, sqlite::Destructor::STATIC)?;
 
     let mut mem_result = fetch_idx_cols_mem.step()?;
     let mut local_result = fetch_idx_cols_local.step()?;
@@ -454,6 +458,8 @@ fn maybe_recreate_index(
     }
 
     if mem_result != local_result {
+        drop(fetch_idx_cols_local);
+        drop(fetch_idx_cols_mem);
         return recreate_index(local_db, idx);
     }
 

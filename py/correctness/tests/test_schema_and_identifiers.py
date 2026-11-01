@@ -254,6 +254,20 @@ def test_automigrate_detects_index_column_change():
         CREATE INDEX IF NOT EXISTS ai ON a (y);
     """,))
     assert c.execute("SELECT name FROM pragma_index_info('ai')").fetchall() == [('y',)]
+
+    # more columns, then a change in uniqueness only
+    c.execute("SELECT crsql_automigrate(?)", ("""
+        CREATE TABLE IF NOT EXISTS a (id PRIMARY KEY NOT NULL, x, y);
+        CREATE INDEX IF NOT EXISTS ai ON a (y, x);
+    """,))
+    assert c.execute(
+        "SELECT name FROM pragma_index_info('ai')").fetchall() == [('y',), ('x',)]
+    c.execute("SELECT crsql_automigrate(?)", ("""
+        CREATE TABLE IF NOT EXISTS a (id PRIMARY KEY NOT NULL, x, y);
+        CREATE UNIQUE INDEX IF NOT EXISTS ai ON a (y, x);
+    """,))
+    assert c.execute(
+        "SELECT \"unique\" FROM pragma_index_list('a') WHERE name = 'ai'").fetchall() == [(1,)]
     close(c)
 
 
