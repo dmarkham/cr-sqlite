@@ -147,15 +147,20 @@ pub extern "C" fn sqlite3_crsqlfractionalindex_init(
 }
 
 /// Drops the functions sqlite3_crsqlfractionalindex_init registers, for when
-/// the extension fails to load.
-pub fn crsql_fractindex_unregister(db: *mut sqlite::sqlite3) {
+/// the extension fails to load. Returns false if SQLite refused to drop any
+/// of them (it does while statements are running).
+pub fn crsql_fractindex_unregister(db: *mut sqlite::sqlite3) -> bool {
+    let mut all_dropped = true;
     for (name, n_arg) in [
         ("crsql_fract_as_ordered", -1),
         ("crsql_fract_key_between", 2),
         ("crsql_fract_fix_conflict_return_old_key", -1),
     ] {
-        let _ = db.create_function_v2(name, n_arg, sqlite::UTF8, None, None, None, None, None);
+        all_dropped &= db
+            .create_function_v2(name, n_arg, sqlite::UTF8, None, None, None, None, None)
+            .is_ok();
     }
+    all_dropped
 }
 
 fn register_functions(db: *mut sqlite::sqlite3) -> c_int {

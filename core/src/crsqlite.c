@@ -68,7 +68,9 @@ __declspec(dllexport)
   if (rc != SQLITE_OK) {
     // A failed load unloads the extension, so drop everything that points at
     // our code or at pExtData. The modules go first: dropping the rust
-    // functions frees pExtData.
+    // functions frees pExtData. If SQLite refuses to drop a function (it does
+    // while statements run, e.g. under `SELECT load_extension()`), the rust
+    // side pins the shared object so it is never unloaded.
     crsql_finalize(pExtData);
     sqlite3_create_module_v2(db, "crsql_changes", 0, 0, 0);
     sqlite3_create_module_v2(db, "crsql_version_guard", 0, 0, 0);

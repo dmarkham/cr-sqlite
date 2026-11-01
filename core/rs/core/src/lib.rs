@@ -35,6 +35,7 @@ mod local_writes;
 pub mod pack_columns;
 #[cfg(not(feature = "test"))]
 mod pack_columns;
+mod pin;
 mod sha;
 mod stmt_cache;
 #[cfg(feature = "test")]
@@ -78,6 +79,7 @@ use teardown::*;
 use triggers::create_triggers;
 
 pub use debug::debug_log;
+pub use pin::pin_extension;
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crsql_as_table(
@@ -118,6 +120,35 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     api: *mut sqlite::api_routines,
 ) -> *mut c_void {
     sqlite::EXTENSION_INIT2(api);
+
+    // Everything that can fail for a reason other than OOM (an unsupported
+    // db version, a read-only or corrupt db, ...) runs before anything is
+    // registered: SQLite cannot always drop what a failed init registered
+    // (see crsql_unregister).
+    let rc = crate::bootstrap::crsql_init_peer_tracking_table(db);
+    if rc != ResultCode::OK as c_int {
+        return null_mut();
+    }
+
+    let rc = crate::bootstrap::crsql_init_db_versions_table(db);
+    if rc != ResultCode::OK as c_int {
+        return null_mut();
+    }
+
+    let rc = crate::bootstrap::crsql_maybe_update_db(db, err_msg);
+    if rc != ResultCode::OK as c_int {
+        return null_mut();
+    }
+
+    let mut site_id = [0u8; consts::SITE_ID_LEN as usize];
+    let rc = crate::bootstrap::crsql_init_site_id(db, site_id.as_mut_ptr());
+    if rc != ResultCode::OK as c_int {
+        return null_mut();
+    }
+
+    if let Err(_) = crate::bootstrap::create_site_id_triggers(db) {
+        return null_mut();
+    }
 
     let rc = db
         .create_function_v2(
@@ -193,16 +224,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return init_failed(db, false);
     }
 
-    let rc = crate::bootstrap::crsql_init_peer_tracking_table(db);
-    if rc != ResultCode::OK as c_int {
-        return init_failed(db, false);
-    }
-
-    let rc = crate::bootstrap::crsql_init_db_versions_table(db);
-    if rc != ResultCode::OK as c_int {
-        return init_failed(db, false);
-    }
-
     let sync_bit_ptr = sqlite::malloc(mem::size_of::<c_int>()) as *mut c_int;
     if sync_bit_ptr.is_null() {
         return init_failed(db, false);
@@ -243,11 +264,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, false);
-    }
-
-    let rc = crate::bootstrap::crsql_maybe_update_db(db, err_msg);
-    if rc != ResultCode::OK as c_int {
         return init_failed(db, false);
     }
 
@@ -295,24 +311,17 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return init_failed(db, true);
     }
 
-    let site_id_buffer =
-        sqlite::malloc((consts::SITE_ID_LEN as usize) * mem::size_of::<*const c_char>());
+    let site_id_buffer = sqlite::malloc(consts::SITE_ID_LEN as usize);
     if site_id_buffer.is_null() {
         return init_failed(db, true);
     }
-    let rc = crate::bootstrap::crsql_init_site_id(db, site_id_buffer);
-    if rc != ResultCode::OK as c_int {
-        sqlite::free(site_id_buffer as *mut c_void);
-        return init_failed(db, true);
+    unsafe {
+        core::ptr::copy_nonoverlapping(site_id.as_ptr(), site_id_buffer, site_id.len());
     }
 
     // From here on ext_data owns site_id_buffer and frees it with itself.
     let rc = unsafe { crsql_initSiteIdExt(db, ext_data, site_id_buffer as *mut c_char) };
     if rc != ResultCode::OK as c_int {
-        return init_failed(db, true);
-    }
-
-    if let Err(_) = crate::bootstrap::create_site_id_triggers(db) {
         return init_failed(db, true);
     }
 
@@ -734,9 +743,11 @@ fn init_failed(db: *mut sqlite::sqlite3, owns_ext_data: bool) -> *mut c_void {
 ///
 /// `owns_ext_data` says crsql_db_version was registered by this init: it is
 /// dropped last and its destructor frees ext_data. SQLite refuses to drop a
-/// function while statements are running; if any drop fails,
-/// crsql_db_version is kept so ext_data stays alive for whatever still holds
-/// it, and is freed when the connection closes.
+/// function while statements are running (e.g. the extension is being loaded
+/// with `SELECT load_extension()`); if any drop fails, crsql_db_version is
+/// kept so ext_data stays alive for whatever still holds it, and is freed
+/// when the connection closes. What is left points into our code, so the
+/// shared object is pinned to stop SQLite from unloading it.
 pub fn crsql_unregister(db: *mut sqlite::sqlite3, owns_ext_data: bool) {
     let drop_function = |name: &str, n_arg: c_int| {
         db.create_function_v2(name, n_arg, sqlite::UTF8, None, None, None, None, None)
@@ -749,7 +760,9 @@ pub fn crsql_unregister(db: *mut sqlite::sqlite3, owns_ext_data: bool) {
     for name in CORE_MODULES {
         let _ = db.create_module_v2(name, core::ptr::null(), None, None);
     }
-    if owns_ext_data && all_dropped {
+    if !all_dropped {
+        pin_extension();
+    } else if owns_ext_data {
         drop_function("crsql_db_version", 0);
     }
 }

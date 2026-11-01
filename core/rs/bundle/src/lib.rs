@@ -50,14 +50,17 @@ pub extern "C" fn sqlite3_crsqlrustbundle_init(
 ) -> *mut ::core::ffi::c_void {
     sqlite::EXTENSION_INIT2(api);
 
-    let rc = sqlite3_crsqlfractionalindex_init(db, err_msg, api);
-    if rc != 0 {
+    // Core first: it does the checks that can fail before it registers
+    // anything (see sqlite3_crsqlcore_init).
+    let ext_data = sqlite3_crsqlcore_init(db, err_msg, api);
+    if ext_data.is_null() {
         return core::ptr::null_mut();
     }
 
-    let ext_data = sqlite3_crsqlcore_init(db, err_msg, api);
-    if ext_data.is_null() {
-        crsql_fractindex_unregister(db);
+    let rc = sqlite3_crsqlfractionalindex_init(db, err_msg, api);
+    if rc != 0 {
+        crsql_rustbundle_unregister(db);
+        return core::ptr::null_mut();
     }
     ext_data
 }
@@ -68,6 +71,9 @@ pub extern "C" fn sqlite3_crsqlrustbundle_init(
 /// drops its own modules (which point at the ext data) first.
 #[no_mangle]
 pub extern "C" fn crsql_rustbundle_unregister(db: *mut sqlite::sqlite3) {
-    crsql_fractindex_unregister(db);
+    if !crsql_fractindex_unregister(db) {
+        // Left registered, so the shared object must stay loaded.
+        crsql_core::pin_extension();
+    }
     crsql_core::crsql_unregister(db, true);
 }
