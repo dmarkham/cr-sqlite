@@ -81,11 +81,23 @@ fn automigrate_impl(
 
         let migrate_result = migrate_to(local_db, &mem_db);
 
-        if let Err(_) = migrate_result {
-            local_db.exec_safe("ROLLBACK")?;
-            let mem_db_err_msg = mem_db.errmsg()?;
-            ctx.result_error(&mem_db_err_msg);
-            ctx.result_error_code(mem_db.errcode());
+        if let Err(code) = migrate_result {
+            // Most failures come from the local db. Grab its error before the rollback below
+            // clears it, and never report SQLITE_OK as the error code.
+            let (err_msg, err_code) = if local_db.errcode() != ResultCode::OK {
+                (local_db.errmsg()?, local_db.errcode())
+            } else if mem_db.errcode() != ResultCode::OK {
+                (mem_db.errmsg()?, mem_db.errcode())
+            } else {
+                (format!("failed to apply the updated schema {:?}", code), code)
+            };
+            local_db.exec_safe("ROLLBACK TO automigrate_tables; RELEASE automigrate_tables;")?;
+            ctx.result_error(&err_msg);
+            ctx.result_error_code(if err_code == ResultCode::OK {
+                ResultCode::ERROR
+            } else {
+                err_code
+            });
             cleanup(mem_db)?;
             return Err(ResultCode::OK);
         } else {
@@ -93,7 +105,11 @@ fn automigrate_impl(
         }
 
         if !desired_schema.is_empty() {
-            local_db.exec_safe(desired_schema)?;
+            if let Err(e) = local_db.exec_safe(desired_schema) {
+                let _ = local_db
+                    .exec_safe("ROLLBACK TO automigrate_tables; RELEASE automigrate_tables;");
+                return Err(e);
+            }
         }
         local_db.exec_safe("RELEASE automigrate_tables")
     } else {

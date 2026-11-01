@@ -49,7 +49,7 @@ pub fn backfill_table(
 
     if let Err(e) = result {
         if !no_tx {
-            db.exec_safe("ROLLBACK")?;
+            db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;")?;
         }
 
         return Err(e);
@@ -57,7 +57,7 @@ pub fn backfill_table(
 
     if let Err(e) = backfill_missing_columns(db, table, pk_cols, non_pk_cols, is_commit_alter) {
         if !no_tx {
-            db.exec_safe("ROLLBACK")?;
+            db.exec_safe("ROLLBACK TO backfill; RELEASE backfill;")?;
         }
 
         return Err(e);

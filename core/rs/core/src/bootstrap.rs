@@ -128,7 +128,7 @@ fn crsql_create_schema_table_if_not_exists(db: *mut sqlite3) -> Result<ResultCod
     )) {
         db.exec_safe("RELEASE crsql_create_schema_table;")
     } else {
-        let _ = db.exec_safe("ROLLBACK");
+        let _ = db.exec_safe("ROLLBACK TO crsql_create_schema_table; RELEASE crsql_create_schema_table;");
         Err(ResultCode::ERROR)
     }
 }
@@ -148,7 +148,7 @@ pub extern "C" fn crsql_maybe_update_db(db: *mut sqlite3, err_msg: *mut *mut c_c
             let _ = db.exec_safe("RELEASE crsql_maybe_update_db;");
             return ResultCode::OK as c_int;
         } else {
-            let _ = db.exec_safe("ROLLBACK;");
+            let _ = db.exec_safe("ROLLBACK TO crsql_maybe_update_db; RELEASE crsql_maybe_update_db;");
             return ResultCode::ERROR as c_int;
         }
     } else {

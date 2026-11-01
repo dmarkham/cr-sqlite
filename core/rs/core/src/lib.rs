@@ -95,9 +95,7 @@ pub extern "C" fn crsql_as_table(
 
     if let Err(_) = crsql_as_table_impl(db, table) {
         ctx.result_error("failed to downgrade the crr");
-        if let Err(_) = db.exec_safe("ROLLBACK") {
-            // fine.
-        }
+        let _ = db.exec_safe("ROLLBACK TO as_table; RELEASE as_table;");
         return;
     }
 
@@ -781,7 +779,7 @@ unsafe extern "C" fn x_crsql_as_crr(
     if rc != ResultCode::OK as c_int {
         sqlite::result_error(ctx, err_msg, -1);
         sqlite::result_error_code(ctx, rc);
-        let _ = db.exec_safe("ROLLBACK");
+        let _ = db.exec_safe("ROLLBACK TO as_crr; RELEASE as_crr;");
         return;
     }
 
@@ -833,7 +831,7 @@ unsafe extern "C" fn x_crsql_begin_alter(
     let rc = remove_crr_triggers_if_exist(db, table_name);
     if rc.is_err() {
         sqlite::result_error_code(ctx, rc.unwrap_err() as c_int);
-        let _ = db.exec_safe("ROLLBACK");
+        let _ = db.exec_safe("ROLLBACK TO alter_crr; RELEASE alter_crr;");
         return;
     }
     ctx.result_text_static("OK");
@@ -925,7 +923,8 @@ unsafe extern "C" fn x_crsql_commit_alter(
             "failed compacting tables post alteration: {}",
             error_str
         ));
-        let _ = db.exec_safe("ROLLBACK");
+        // undo to the savepoint crsql_begin_alter opened (if any), not the caller's transaction
+        let _ = db.exec_safe("ROLLBACK TO alter_crr; RELEASE alter_crr;");
         return;
     }
 }

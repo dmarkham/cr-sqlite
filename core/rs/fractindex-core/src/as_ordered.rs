@@ -59,14 +59,14 @@ pub fn as_ordered(
         .collect::<Vec<_>>();
     // 2. set up triggers to allow for append and pre-pend insertions
     if let Err(_) = create_pend_trigger(db, table, order_by_column, &collection_column_names) {
-        let _ = db.exec_safe("ROLLBACK;");
+        let _ = db.exec_safe("ROLLBACK TO as_ordered; RELEASE as_ordered;");
         context.result_error("Failed creating triggers for the base table");
         return;
     }
 
     if let Err(_) = create_simple_move_trigger(db, table, order_by_column, &collection_column_names)
     {
-        let _ = db.exec_safe("ROLLBACK;");
+        let _ = db.exec_safe("ROLLBACK TO as_ordered; RELEASE as_ordered;");
         context.result_error("Failed creating simple move trigger");
         return;
     }
@@ -75,7 +75,7 @@ pub fn as_ordered(
     if let Err(_) =
         create_fract_view_and_view_triggers(db, table, order_by_column, &collection_column_names)
     {
-        let _ = db.exec_safe("ROLLBACK;");
+        let _ = db.exec_safe("ROLLBACK TO as_ordered; RELEASE as_ordered;");
         context.result_error("Failed creating view for the base table");
         return;
     }

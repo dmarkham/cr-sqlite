@@ -137,23 +137,46 @@ def test_error_paths_do_not_rollback_outer_tx(tmp_path):
         CREATE TABLE IF NOT EXISTS bad (x);
         CREATE TABLE IF NOT EXISTS a (id PRIMARY KEY NOT NULL, x, y NOT NULL);
     """,))
+    # re-applying the schema fails (no IF NOT EXISTS): the automigrate savepoint must not be
+    # left open as a dangling transaction
+    with pytest.raises(sqlite3.Error):
+        c.execute("SELECT crsql_automigrate(?)", ("""
+            CREATE TABLE k (id);
+            CREATE TABLE IF NOT EXISTS bad (x);
+            CREATE TABLE IF NOT EXISTS a (id PRIMARY KEY NOT NULL, x);
+        """,))
+    assert not c.in_transaction
     close(c)
 
-    # bootstrap: loading the extension into a db written by an unsupported version fails
+    # bootstrap: loading the extension into a db written by an unsupported version fails.
+    # Run isolated and skip interpreter teardown: a failed load leaves functions registered that
+    # point into the unloaded library (a separate init bug), which can crash at teardown.
     path = str(tmp_path / "old.db")
-    raw = sqlite3.connect(path, isolation_level=None)
-    raw.execute("CREATE TABLE crsql_master (key TEXT PRIMARY KEY, value ANY)")
-    raw.execute("INSERT INTO crsql_master VALUES ('crsqlite_version', 1)")
-    raw.execute("CREATE TABLE k (id)")
-    raw.execute("BEGIN")
-    raw.execute("INSERT INTO k VALUES (1)")
-    raw.enable_load_extension(True)
-    with pytest.raises(sqlite3.Error):
-        raw.load_extension(EXT)
-    assert raw.in_transaction
-    assert raw.execute("SELECT count(*) FROM k").fetchone()[0] == 1
-    raw.execute("ROLLBACK")
-    raw.close()
+    r = run_isolated(f"""
+import os
+raw = sqlite3.connect({path!r}, isolation_level=None)
+raw.execute("CREATE TABLE crsql_master (key TEXT PRIMARY KEY, value ANY)")
+raw.execute("INSERT INTO crsql_master VALUES ('crsqlite_version', 1)")
+raw.execute("CREATE TABLE k (id)")
+raw.execute("BEGIN")
+raw.execute("INSERT INTO k VALUES (1)")
+raw.enable_load_extension(True)
+try:
+    raw.load_extension(EXT)
+    print("loaded")
+except sqlite3.Error as e:
+    print("load failed")
+print("in_tx", raw.in_transaction)
+print("count", raw.execute("SELECT count(*) FROM k").fetchone()[0])
+raw.execute("ROLLBACK")
+print("done", flush=True)
+os._exit(0)
+""")
+    assert r.returncode == 0, r.stderr
+    assert "load failed" in r.stdout
+    assert "in_tx True" in r.stdout
+    assert "count 1" in r.stdout
+    assert "done" in r.stdout
 
 
 @pytest.mark.parametrize("tbl", ["my table", "order", "a'b", 'a"b'])
