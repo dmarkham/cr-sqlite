@@ -154,6 +154,7 @@ int crsql_changes_eof(sqlite3_vtab_cursor *cur);
 int crsql_changes_savepoint(sqlite3_vtab *pVTab, int iSavepoint);
 int crsql_changes_release(sqlite3_vtab *pVTab, int iSavepoint);
 int crsql_changes_rollback_to(sqlite3_vtab *pVTab, int iSavepoint);
+int crsql_changes_rollback(sqlite3_vtab *pVTab);
 
 sqlite3_module crsql_changesModule = {
     /* iVersion    */ 2,
@@ -173,7 +174,7 @@ sqlite3_module crsql_changesModule = {
     /* xBegin      */ crsql_changes_begin,
     /* xSync       */ 0,
     /* xCommit     */ crsql_changes_commit,
-    /* xRollback   */ 0,
+    /* xRollback   */ crsql_changes_rollback,
     /* xFindMethod */ 0,
     /* xRename     */ 0,
     /* xSavepoint  */ crsql_changes_savepoint,

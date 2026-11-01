@@ -566,6 +566,17 @@ pub extern "C" fn crsql_changes_commit(vtab: *mut sqlite::vtab) -> c_int {
     ResultCode::OK as c_int
 }
 
+// A rolled back transaction impacted no rows. The connection's caches are
+// reset by the rollback hook.
+#[no_mangle]
+pub extern "C" fn crsql_changes_rollback(vtab: *mut sqlite::vtab) -> c_int {
+    let tab = vtab.cast::<crsql_Changes_vtab>();
+    unsafe {
+        (*(*tab).pExtData).rowsImpacted = 0;
+    }
+    ResultCode::OK as c_int
+}
+
 #[no_mangle]
 pub extern "C" fn crsql_changes_savepoint(_vtab: *mut sqlite::vtab, _n: c_int) -> c_int {
     ResultCode::OK as c_int
