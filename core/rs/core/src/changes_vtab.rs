@@ -349,9 +349,6 @@ unsafe fn changes_next(
     let tbl = (*cursor)
         .pChangesStmt
         .column_text(ClockUnionColumn::Tbl as i32);
-    let pks = (*cursor)
-        .pChangesStmt
-        .column_value(ClockUnionColumn::Pks as i32);
     let cid = (*cursor)
         .pChangesStmt
         .column_text(ClockUnionColumn::Cid as i32);
@@ -397,26 +394,45 @@ unsafe fn changes_next(
         (*cursor).rowType = ChangeRowType::Update as c_int;
     }
 
+    // The value is looked up in xColumn (see `row_value`) rather than here: the row stmt is
+    // cached per table+column and shared by every cursor on this connection, so holding it
+    // stepped between calls breaks self joins and correlated subqueries on crsql_changes.
+    Ok(ResultCode::OK)
+}
+
+/// Looks up the current value of the cursor's (pk, cid) and returns it through `ctx`.
+/// The shared, cached row stmt is reset before returning so no other cursor can observe it
+/// mid-step. A row that no longer exists yields NULL.
+unsafe fn row_value(
+    cursor: *mut crsql_Changes_cursor,
+    ctx: *mut sqlite::context,
+) -> Result<ResultCode, ResultCode> {
+    let changes_stmt = (*cursor).pChangesStmt;
+    let tbl_infos = mem::ManuallyDrop::new(Box::from_raw(
+        (*(*(*cursor).pTab).pExtData).tableInfos as *mut Vec<TableInfo>,
+    ));
+    let tbl_info = tbl_infos
+        .get((*cursor).tblInfoIdx as usize)
+        .ok_or(ResultCode::ERROR)?;
+    let cid = changes_stmt.column_text(ClockUnionColumn::Cid as i32);
+    let unpacked_pks = unpack_columns(changes_stmt.column_blob(ClockUnionColumn::Pks as i32))?;
+
     let row_stmt_ref = tbl_info.get_row_patch_data_stmt((*(*cursor).pTab).db, cid)?;
     let row_stmt = row_stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
 
-    let packed_pks = pks.blob();
-    let unpacked_pks = unpack_columns(packed_pks)?;
-    bind_package_to_stmt(row_stmt.stmt, &unpacked_pks, 0)?;
-
+    if let Err(rc) = bind_package_to_stmt(row_stmt.stmt, &unpacked_pks, 0) {
+        reset_cached_stmt(row_stmt.stmt)?;
+        return Err(rc);
+    }
     match row_stmt.step() {
-        Ok(ResultCode::DONE) => {
-            reset_cached_stmt(row_stmt.stmt)?;
-        }
-        Ok(_) => {}
+        Ok(ResultCode::ROW) => ctx.result_value(row_stmt.stmt.column_value(0)),
+        Ok(_) => ctx.result_null(),
         Err(rc) => {
             reset_cached_stmt(row_stmt.stmt)?;
             return Err(rc);
         }
     }
-
-    (*cursor).pRowStmt = row_stmt.stmt;
-    Ok(ResultCode::OK)
+    reset_cached_stmt(row_stmt.stmt)
 }
 
 #[no_mangle]
@@ -457,10 +473,10 @@ fn column_impl(
             ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Pks as i32));
         }
         Some(CrsqlChangesColumn::Cval) => unsafe {
-            if (*cursor).pRowStmt.is_null() {
-                ctx.result_null();
+            if (*cursor).rowType == ChangeRowType::Update as c_int {
+                row_value(cursor, ctx)?;
             } else {
-                ctx.result_value((*cursor).pRowStmt.column_value(0));
+                ctx.result_null();
             }
         },
         Some(CrsqlChangesColumn::Cid) => unsafe {
@@ -469,11 +485,7 @@ fn column_impl(
                 Some(ChangeRowType::PkOnly) => ctx.result_text_static(crate::c::INSERT_SENTINEL),
                 Some(ChangeRowType::Delete) => ctx.result_text_static(crate::c::DELETE_SENTINEL),
                 Some(ChangeRowType::Update) => {
-                    if (*cursor).pRowStmt.is_null() {
-                        ctx.result_text_static(crate::c::DELETE_SENTINEL);
-                    } else {
-                        ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Cid as i32));
-                    }
+                    ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Cid as i32));
                 }
                 None => return Err(ResultCode::ABORT),
             }
