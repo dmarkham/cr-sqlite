@@ -53,7 +53,7 @@ extern "C" fn disconnect(vtab: *mut sqlite::vtab) -> c_int {
     ResultCode::OK as c_int
 }
 
-extern "C" fn best_index(vtab: *mut sqlite::vtab, index_info: *mut sqlite::index_info) -> c_int {
+extern "C" fn best_index(_vtab: *mut sqlite::vtab, index_info: *mut sqlite::index_info) -> c_int {
     // TODO: better bindings to create this slice for the user
     let constraints = unsafe {
         slice::from_raw_parts_mut(
@@ -68,23 +68,39 @@ extern "C" fn best_index(vtab: *mut sqlite::vtab, index_info: *mut sqlite::index
         )
     };
 
+    // Only `package = ?` can drive the scan. Constraints on `cell` are left to sqlite.
+    let mut package_constraint = None;
+    let mut unusable_package_constraint = false;
     for (i, constraint) in constraints.iter().enumerate() {
-        if constraint.usable == 0 {
+        if constraint.iColumn != Columns::PACKAGE as i32
+            || constraint.op != sqlite::INDEX_CONSTRAINT_EQ as u8
+        {
             continue;
         }
-        if constraint.iColumn != Columns::PACKAGE as i32 {
-            unsafe {
-                (*vtab).zErrMsg = CString::new(format!(
-                    "no package column specified. Got {:?} instead",
-                    Columns::PACKAGE
-                ))
-                .map_or(core::ptr::null_mut(), |f| f.into_raw());
-            }
-            return ResultCode::MISUSE as c_int;
-        } else {
+        if constraint.usable == 0 {
+            unusable_package_constraint = true;
+        } else if package_constraint.is_none() {
+            package_constraint = Some(i);
+        }
+    }
+
+    match package_constraint {
+        Some(i) => {
             constraint_usage[i].argvIndex = 1;
             constraint_usage[i].omit = 1;
+            unsafe {
+                (*index_info).idxNum = 1;
+                (*index_info).estimatedCost = 1.0;
+                (*index_info).estimatedRows = 10;
+            }
         }
+        // the package comes from another table that hasn't been scanned yet in this plan.
+        // Tell sqlite this plan can't work so it picks one where the package is available.
+        None if unusable_package_constraint => return ResultCode::CONSTRAINT as c_int,
+        None => unsafe {
+            (*index_info).idxNum = 0;
+            (*index_info).estimatedCost = 2147483647.0;
+        },
     }
 
     ResultCode::OK as c_int
@@ -192,7 +208,7 @@ extern "C" fn column(
                 let col_value = &cols[(*crsr).crsr];
                 match col_value {
                     ColumnValue::Blob(b) => {
-                        ctx.result_blob_static(b);
+                        ctx.result_blob_transient(b);
                     }
                     ColumnValue::Float(f) => {
                         ctx.result_double(*f);
@@ -204,7 +220,7 @@ extern "C" fn column(
                         ctx.result_null();
                     }
                     ColumnValue::Text(t) => {
-                        ctx.result_text_static(t);
+                        ctx.result_text_transient(t);
                     }
                 }
                 ResultCode::OK as c_int
