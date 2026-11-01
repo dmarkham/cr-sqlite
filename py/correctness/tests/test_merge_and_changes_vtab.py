@@ -132,9 +132,9 @@ def test_unpack_columns_results_are_not_dangling():
     c.execute("INSERT INTO p SELECT crsql_pack_columns('zzzz-' || printf('%040d', 1))")
     for i in range(2, 50):
         c.execute("INSERT INTO p SELECT crsql_pack_columns('aaaa-' || printf('%040d', ?))", (i,))
-    c.execute("INSERT INTO p SELECT crsql_pack_columns(x'ffff' || randomblob(40))")
+    c.execute("INSERT INTO p SELECT crsql_pack_columns(CAST(x'ffff' || randomblob(40) AS BLOB))")
     for i in range(2, 50):
-        c.execute("INSERT INTO p SELECT crsql_pack_columns(x'0000' || randomblob(40))")
+        c.execute("INSERT INTO p SELECT crsql_pack_columns(CAST(x'0000' || randomblob(40) AS BLOB))")
     expected_text = 'zzzz-' + '%040d' % 1
     for _ in range(3):
         assert c.execute(
