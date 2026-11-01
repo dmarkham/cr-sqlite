@@ -128,6 +128,11 @@ extern "C" {
         db: *mut sqlite::sqlite3,
         pExtData: *mut crsql_ExtData,
     ) -> c_int;
+    pub fn crsql_enlist_table_infos_guard(
+        db: *mut sqlite::sqlite3,
+        pExtData: *mut crsql_ExtData,
+        mayEnlist: c_int,
+    ) -> c_int;
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use crate::alloc::string::ToString;
 use crate::c::crsql_ExtData;
+use crate::c::crsql_enlist_table_infos_guard;
 use crate::c::crsql_fetchPragmaSchemaVersion;
 use crate::c::TABLE_INFO_SCHEMA_VERSION;
 use crate::pack_columns::bind_package_to_stmt;
@@ -914,6 +915,26 @@ pub extern "C" fn crsql_ensure_table_infos_are_up_to_date(
     ext_data: *mut crsql_ExtData,
     err: *mut *mut c_char,
 ) -> c_int {
+    ensure_table_infos_are_up_to_date(db, ext_data, err, true)
+}
+
+/// For the changes vtab's xConnect, which runs while SQLite prepares a
+/// statement: no other statement (the guard INSERT) is stepped from there.
+#[no_mangle]
+pub extern "C" fn crsql_ensure_table_infos_are_up_to_date_in_connect(
+    db: *mut sqlite::sqlite3,
+    ext_data: *mut crsql_ExtData,
+    err: *mut *mut c_char,
+) -> c_int {
+    ensure_table_infos_are_up_to_date(db, ext_data, err, false)
+}
+
+fn ensure_table_infos_are_up_to_date(
+    db: *mut sqlite::sqlite3,
+    ext_data: *mut crsql_ExtData,
+    err: *mut *mut c_char,
+    may_enlist: bool,
+) -> c_int {
     // Always consult the schema version: a crsql_as_crr / crsql_commit_alter (or a rollback of
     // one) can happen after the first write of a transaction.
     let schema_changed =
@@ -933,6 +954,17 @@ pub extern "C" fn crsql_ensure_table_infos_are_up_to_date(
                 forget(table_infos);
                 unsafe {
                     (*ext_data).updatedTableInfosThisTx = 1;
+                }
+                // The schema version these were pulled at can be undone by a ROLLBACK TO and
+                // reached again by later DDL; the version guard's xRollbackTo forgets them.
+                // Without the guard they are only trusted until the next lookup.
+                let rc = unsafe {
+                    crsql_enlist_table_infos_guard(db, ext_data, may_enlist as c_int)
+                };
+                if rc != ResultCode::OK as c_int {
+                    unsafe {
+                        (*ext_data).pragmaSchemaVersionForTableInfos = -1;
+                    }
                 }
                 return ResultCode::OK as c_int;
             }

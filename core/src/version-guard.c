@@ -19,7 +19,9 @@
  * xRollbackTo makes the next refresh reload the state ExtData caches from
  * the database (e.g. the merge-equal-values config), which a ROLLBACK TO or
  * failed statement may have undone. crsql_config_set enlists the guard via
- * crsql_enlist_version_guard for exactly that, without reserving a version.
+ * crsql_enlist_version_guard for exactly that, without reserving a version,
+ * and so does every table info pull inside a write transaction
+ * (crsql_enlist_table_infos_guard).
  */
 #include "version-guard.h"
 
@@ -141,9 +143,13 @@ static int versionGuardSavepoint(sqlite3_vtab *vtab, int savepoint) {
 // cached in ExtData, such as a crsql_config_set. Forget the cached data
 // version so the next refresh_connection_state_if_needed reloads that state
 // from what the transaction now sees. The pending db_version stays reserved.
+// It may also have undone schema changes the table infos were pulled at, and
+// later DDL can bring PRAGMA schema_version back to the same number, so the
+// table infos are re-pulled as well.
 static int versionGuardRollbackTo(sqlite3_vtab *vtab, int savepoint) {
   crsql_VersionGuard *guard = (crsql_VersionGuard *)vtab;
   guard->extData->pragmaDataVersion = -1;
+  guard->extData->pragmaSchemaVersionForTableInfos = -1;
   return SQLITE_OK;
 }
 
@@ -189,6 +195,19 @@ int crsql_enlist_version_guard(sqlite3 *db, crsql_ExtData *extData) {
   int result = rc == SQLITE_DONE ? SQLITE_OK : rc;
   rc = sqlite3_reset(stmt);
   return result == SQLITE_OK ? rc : result;
+}
+
+// Table infos pulled inside a write transaction may describe a schema change
+// of that transaction, which a ROLLBACK TO can undo. Enlist the guard so its
+// xRollbackTo forgets them. A read transaction cannot change the schema, and
+// must not take the write lock the guard INSERT would. Anything but SQLITE_OK
+// means the table infos are not covered by the guard (with `mayEnlist` 0 the
+// guard is never enlisted, SQLITE_MISUSE).
+int crsql_enlist_table_infos_guard(sqlite3 *db, crsql_ExtData *extData,
+                                   int mayEnlist) {
+  if (sqlite3_txn_state(db, 0) != SQLITE_TXN_WRITE) return SQLITE_OK;
+  if (!mayEnlist) return SQLITE_MISUSE;
+  return crsql_enlist_version_guard(db, extData);
 }
 
 int crsql_enlist_db_version(sqlite3 *db, crsql_ExtData *extData) {
