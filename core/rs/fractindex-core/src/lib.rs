@@ -139,6 +139,26 @@ pub extern "C" fn sqlite3_crsqlfractionalindex_init(
 ) -> c_int {
     sqlite::EXTENSION_INIT2(api);
 
+    let rc = register_functions(db);
+    if rc != ResultCode::OK as c_int {
+        crsql_fractindex_unregister(db);
+    }
+    rc
+}
+
+/// Drops the functions sqlite3_crsqlfractionalindex_init registers, for when
+/// the extension fails to load.
+pub fn crsql_fractindex_unregister(db: *mut sqlite::sqlite3) {
+    for (name, n_arg) in [
+        ("crsql_fract_as_ordered", -1),
+        ("crsql_fract_key_between", 2),
+        ("crsql_fract_fix_conflict_return_old_key", -1),
+    ] {
+        let _ = db.create_function_v2(name, n_arg, sqlite::UTF8, None, None, None, None, None);
+    }
+}
+
+fn register_functions(db: *mut sqlite::sqlite3) -> c_int {
     if let Err(rc) = db.create_function_v2(
         "crsql_fract_as_ordered",
         -1,

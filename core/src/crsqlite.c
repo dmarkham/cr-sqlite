@@ -37,6 +37,7 @@ static void closeHook(void *pUserData, sqlite3 *db) {
 
 void *sqlite3_crsqlrustbundle_init(sqlite3 *db, char **pzErrMsg,
                                    const sqlite3_api_routines *pApi);
+void crsql_rustbundle_unregister(sqlite3 *db);
 
 #ifdef _WIN32
 __declspec(dllexport)
@@ -73,7 +74,13 @@ __declspec(dllexport)
                                   &crsql_versionGuardModule, pExtData, 0);
   }
   if (rc != SQLITE_OK) {
+    // A failed load unloads the extension, so drop everything that points at
+    // our code or at pExtData. The modules go first: dropping the rust
+    // functions frees pExtData.
     crsql_finalize(pExtData);
+    sqlite3_create_module_v2(db, "crsql_changes", 0, 0, 0);
+    sqlite3_create_module_v2(db, "crsql_version_guard", 0, 0, 0);
+    crsql_rustbundle_unregister(db);
     return rc;
   }
 

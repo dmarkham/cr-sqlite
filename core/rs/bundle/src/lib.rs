@@ -10,7 +10,7 @@ use crsql_core;
 use crsql_core::sqlite3_crsqlcore_init;
 #[cfg(feature = "test")]
 pub use crsql_core::test_exports;
-use crsql_fractindex_core::sqlite3_crsqlfractionalindex_init;
+use crsql_fractindex_core::{crsql_fractindex_unregister, sqlite3_crsqlfractionalindex_init};
 #[cfg(feature = "test")]
 use libc_print::std_name::println;
 use sqlite_nostd as sqlite;
@@ -61,5 +61,19 @@ pub extern "C" fn sqlite3_crsqlrustbundle_init(
         return core::ptr::null_mut();
     }
 
-    sqlite3_crsqlcore_init(db, err_msg, api)
+    let ext_data = sqlite3_crsqlcore_init(db, err_msg, api);
+    if ext_data.is_null() {
+        crsql_fractindex_unregister(db);
+    }
+    ext_data
+}
+
+/// Undoes a successful sqlite3_crsqlrustbundle_init when the rest of the
+/// extension init fails: drops every function and module it registered and,
+/// through crsql_db_version's destructor, frees the ext data. The C caller
+/// drops its own modules (which point at the ext data) first.
+#[no_mangle]
+pub extern "C" fn crsql_rustbundle_unregister(db: *mut sqlite::sqlite3) {
+    crsql_fractindex_unregister(db);
+    crsql_core::crsql_unregister(db, true);
 }

@@ -132,7 +132,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = db
@@ -148,7 +148,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = db
@@ -164,7 +164,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = db
@@ -180,27 +180,27 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = unpack_columns_vtab::create_module(db).unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = create_cl_set_vtab::create_module(db).unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = crate::bootstrap::crsql_init_peer_tracking_table(db);
     if rc != ResultCode::OK as c_int {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = crate::bootstrap::crsql_init_db_versions_table(db);
     if rc != ResultCode::OK as c_int {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let sync_bit_ptr = sqlite::malloc(mem::size_of::<c_int>()) as *mut c_int;
@@ -222,19 +222,40 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     let rc = crate::bootstrap::crsql_maybe_update_db(db, err_msg);
     if rc != ResultCode::OK as c_int {
-        return null_mut();
+        return init_failed(db, false);
     }
 
     // allocate ext data earlier in the init process because we need its
     // pointer to be available for the crsql_update_site_id function.
     let ext_data = unsafe { crsql_newExtData(db) };
     if ext_data.is_null() {
-        return null_mut();
+        return init_failed(db, false);
+    }
+
+    // crsql_db_version owns ext_data: SQLite calls x_free_connection_ext_data
+    // when the function is dropped (connection close, re-registration, or
+    // a failed registration). Register it first so ext_data is never freed
+    // by hand; every later failure goes through init_failed.
+    let rc = db
+        .create_function_v2(
+            "crsql_db_version",
+            0,
+            sqlite::INNOCUOUS | sqlite::UTF8,
+            Some(ext_data as *mut c_void),
+            Some(x_crsql_db_version),
+            None,
+            None,
+            Some(x_free_connection_ext_data),
+        )
+        .unwrap_or(ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        // SQLite already ran the destructor.
+        return init_failed(db, false);
     }
 
     let rc = db
@@ -250,34 +271,25 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
-
-    // TODO: convert this function to a proper rust function
-    // and have rust free:
-    // 1. site_id_buffer
-    // 2. ext_data
-    // automatically.
 
     let site_id_buffer =
         sqlite::malloc((consts::SITE_ID_LEN as usize) * mem::size_of::<*const c_char>());
     let rc = crate::bootstrap::crsql_init_site_id(db, site_id_buffer);
     if rc != ResultCode::OK as c_int {
         sqlite::free(site_id_buffer as *mut c_void);
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
+    // From here on ext_data owns site_id_buffer and frees it with itself.
     let rc = unsafe { crsql_initSiteIdExt(db, ext_data, site_id_buffer as *mut c_char) };
     if rc != ResultCode::OK as c_int {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     if let Err(_) = crate::bootstrap::create_site_id_triggers(db) {
-        sqlite::free(site_id_buffer as *mut c_void);
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -293,25 +305,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
-    }
-
-    let rc = db
-        .create_function_v2(
-            "crsql_db_version",
-            0,
-            sqlite::INNOCUOUS | sqlite::UTF8,
-            Some(ext_data as *mut c_void),
-            Some(x_crsql_db_version),
-            None,
-            None,
-            Some(x_free_connection_ext_data),
-        )
-        .unwrap_or(ResultCode::ERROR);
-    if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -327,8 +321,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -344,8 +337,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -361,8 +353,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -378,8 +369,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -395,8 +385,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -412,8 +401,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -429,8 +417,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -446,8 +433,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     #[cfg(feature = "test")]
@@ -461,8 +447,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     #[cfg(feature = "test")]
@@ -476,8 +461,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     #[cfg(feature = "test")]
@@ -491,8 +475,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -508,8 +491,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -525,8 +507,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -542,8 +523,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -559,8 +539,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -576,8 +555,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -593,8 +571,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -610,8 +587,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -627,8 +603,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -644,8 +619,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -661,8 +635,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     let rc = db
@@ -678,11 +651,82 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        unsafe { crsql_freeExtData(ext_data) };
-        return null_mut();
+        return init_failed(db, true);
     }
 
     return ext_data as *mut c_void;
+}
+
+/// Every function registered with ext_data as its user data, other than
+/// crsql_db_version, as (name, n_arg).
+const EXT_DATA_FUNCTIONS: &[(&str, c_int)] = &[
+    ("crsql_update_site_id", 2),
+    ("crsql_site_id", 0),
+    ("crsql_next_db_version", -1),
+    ("crsql_peek_next_db_version", 0),
+    ("crsql_increment_and_get_seq", 0),
+    ("crsql_get_seq", 0),
+    ("crsql_set_ts", 1),
+    ("crsql_cache_site_ordinal", 1),
+    ("crsql_cache_pk_cl", 2),
+    ("crsql_cache_db_version", 1),
+    ("crsql_set_db_version", -1),
+    ("crsql_get_ts", -1),
+    ("crsql_commit_alter", -1),
+    ("crsql_finalize", -1),
+    ("crsql_after_update", -1),
+    ("crsql_after_insert", -1),
+    ("crsql_after_delete", -1),
+    ("crsql_rows_impacted", 0),
+    ("crsql_config_set", 2),
+    ("crsql_config_get", 1),
+];
+
+/// Functions registered by sqlite3_crsqlcore_init without ext_data, as
+/// (name, n_arg).
+const CORE_FUNCTIONS: &[(&str, c_int)] = &[
+    ("crsql_set_debug", 1),
+    ("crsql_automigrate", -1),
+    ("crsql_pack_columns", -1),
+    ("crsql_as_table", 1),
+    ("crsql_internal_sync_bit", -1),
+    ("crsql_sha", 0),
+    ("crsql_version", 0),
+    ("crsql_as_crr", -1),
+    ("crsql_begin_alter", -1),
+];
+
+const CORE_MODULES: &[&str] = &["crsql_unpack_columns", "clset"];
+
+fn init_failed(db: *mut sqlite::sqlite3, owns_ext_data: bool) -> *mut c_void {
+    crsql_unregister(db, owns_ext_data);
+    null_mut()
+}
+
+/// Drops every function and module sqlite3_crsqlcore_init registers. When
+/// init fails SQLite unloads the extension while the connection stays
+/// usable, so nothing may be left pointing at our code or at ext_data.
+///
+/// `owns_ext_data` says crsql_db_version was registered by this init: it is
+/// dropped last and its destructor frees ext_data. SQLite refuses to drop a
+/// function while statements are running; if any drop fails,
+/// crsql_db_version is kept so ext_data stays alive for whatever still holds
+/// it, and is freed when the connection closes.
+pub fn crsql_unregister(db: *mut sqlite::sqlite3, owns_ext_data: bool) {
+    let drop_function = |name: &str, n_arg: c_int| {
+        db.create_function_v2(name, n_arg, sqlite::UTF8, None, None, None, None, None)
+            .is_ok()
+    };
+    let mut all_dropped = true;
+    for (name, n_arg) in CORE_FUNCTIONS.iter().chain(EXT_DATA_FUNCTIONS) {
+        all_dropped &= drop_function(name, *n_arg);
+    }
+    for name in CORE_MODULES {
+        let _ = db.create_module_v2(name, core::ptr::null(), None, None);
+    }
+    if owns_ext_data && all_dropped {
+        drop_function("crsql_db_version", 0);
+    }
 }
 
 /**

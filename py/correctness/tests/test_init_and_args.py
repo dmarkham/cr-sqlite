@@ -292,7 +292,7 @@ def test_init_failure_paths(tmp_path, drop):
     assert not loaded
     # 50 failed loads must not leak the ext data and its statements.
     assert growth < 50 * 256, growth
-    assert changes == 2
+    assert changes == 1
 
 
 def test_function_flags():
