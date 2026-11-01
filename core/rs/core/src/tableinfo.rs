@@ -1124,9 +1124,11 @@ pub fn is_table_compatible(
         return Ok(false);
     }
 
-    // Check for default value or nullable
+    // Check for default value or nullable.
+    // pragma_table_info, not _xinfo: generated columns are never written to (they are not
+    // tracked as non_pks either), so their NOT NULL is not a compatibility problem.
     if db.count(&format!(
-        "SELECT count(*) FROM pragma_table_xinfo('{table_val}')
+        "SELECT count(*) FROM pragma_table_info('{table_val}')
         WHERE \"notnull\" = 1 AND \"dflt_value\" IS NULL AND \"pk\" = 0"
     ))? != 0
     {
