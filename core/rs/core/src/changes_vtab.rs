@@ -107,40 +107,36 @@ fn changes_best_index(
         }
     }
 
-    let mut desc = 0;
+    // Only consume the ORDER BY if every term maps onto a clock table column; otherwise
+    // sqlite sorts and we fall back to the default in-order retrieval.
     let order_bys = sqlite::args!((*index_info).nOrderBy, (*index_info).aOrderBy);
-    let mut order_by_consumed = true;
-    if !order_bys.is_empty() {
-        str.push_str(" ORDER BY ");
-    } else {
-        // The user didn't provide an ordering? Tack on a default one that will
-        // retrieve changes in-order
-        str.push_str(" ORDER BY db_vrsn, seq ASC");
-    }
-    first_constraint = true;
-    for order_by in order_bys {
-        desc = order_by.desc;
-        let col = CrsqlChangesColumn::from_i32(order_by.iColumn);
-        if let Some(col_name) = get_clock_table_col_name(&col) {
-            if first_constraint {
-                first_constraint = false;
-            } else {
-                str.push_str(", ");
-            }
-            str.push_str(&col_name);
-        } else {
-            // TODO: test we're consuming
-            order_by_consumed = false;
+    let order_by_terms: Option<Vec<String>> = order_bys
+        .iter()
+        .map(|order_by| {
+            get_clock_table_col_name(&CrsqlChangesColumn::from_i32(order_by.iColumn)).map(
+                |col_name| {
+                    format!(
+                        "{} {}",
+                        col_name,
+                        if order_by.desc != 0 { "DESC" } else { "ASC" }
+                    )
+                },
+            )
+        })
+        .collect();
+    let order_by_consumed = match order_by_terms {
+        Some(terms) if !terms.is_empty() => {
+            str.push_str(" ORDER BY ");
+            str.push_str(&terms.join(", "));
+            true
         }
-    }
-
-    if !order_bys.is_empty() {
-        if desc != 0 {
-            str.push_str(" DESC");
-        } else {
-            str.push_str(" ASC");
+        // The user didn't provide an ordering (or one we can't translate)? Tack on a
+        // default one that will retrieve changes in-order
+        terms => {
+            str.push_str(" ORDER BY db_vrsn, seq ASC");
+            terms.is_some()
         }
-    }
+    };
 
     // manual null-term since we'll pass to C
     str.push('\0');
