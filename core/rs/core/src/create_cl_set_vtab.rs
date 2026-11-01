@@ -3,7 +3,9 @@ extern crate alloc;
 use core::ffi::{c_char, c_int, c_void};
 
 use crate::alloc::borrow::ToOwned;
+use crate::c::crsql_ExtData;
 use crate::create_crr::create_crr;
+use crate::ext_data::INIT_FAILED;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
@@ -24,12 +26,17 @@ struct CLSetTab {
 // used in response to `create virtual table ... using clset`
 extern "C" fn create(
     db: *mut sqlite::sqlite3,
-    _aux: *mut c_void,
+    aux: *mut c_void,
     argc: c_int,
     argv: *const *const c_char,
     vtab: *mut *mut sqlite::vtab,
     err: *mut *mut c_char,
 ) -> c_int {
+    // aux is the connection's ext data (see create_module).
+    if unsafe { (*(aux as *mut crsql_ExtData)).initFailed } != 0 {
+        err.set(INIT_FAILED);
+        return ResultCode::ERROR as c_int;
+    }
     match create_impl(db, argc, argv, vtab, err) {
         Ok(rc) => rc as c_int,
         Err(rc) => {
@@ -269,8 +276,11 @@ static MODULE: sqlite_nostd::module = sqlite_nostd::module {
     xIntegrity: None,
 };
 
-pub fn create_module(db: *mut sqlite::sqlite3) -> Result<ResultCode, ResultCode> {
-    db.create_module_v2("clset", &MODULE, None, None)?;
+pub fn create_module(
+    db: *mut sqlite::sqlite3,
+    ext_data: *mut crsql_ExtData,
+) -> Result<ResultCode, ResultCode> {
+    db.create_module_v2("clset", &MODULE, Some(ext_data as *mut c_void), None)?;
 
     // xCreate(|x| 0);
 

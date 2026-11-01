@@ -88,6 +88,9 @@ pub extern "C" fn crsql_as_table(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let args = sqlite::args!(argc, argv);
     let db = ctx.db_handle();
     let table = args[0].text();
@@ -169,22 +172,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 
     let rc = db
         .create_function_v2(
-            "crsql_automigrate",
-            -1,
-            sqlite::UTF8 | sqlite::DIRECTONLY,
-            None,
-            Some(crsql_automigrate),
-            None,
-            None,
-            None,
-        )
-        .unwrap_or(sqlite::ResultCode::ERROR);
-    if rc != ResultCode::OK {
-        return init_failed(db, false);
-    }
-
-    let rc = db
-        .create_function_v2(
             "crsql_pack_columns",
             -1,
             sqlite::UTF8,
@@ -199,28 +186,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return init_failed(db, false);
     }
 
-    let rc = db
-        .create_function_v2(
-            "crsql_as_table",
-            1,
-            sqlite::UTF8 | sqlite::DIRECTONLY,
-            None,
-            Some(crsql_as_table),
-            None,
-            None,
-            None,
-        )
-        .unwrap_or(sqlite::ResultCode::ERROR);
-    if rc != ResultCode::OK {
-        return init_failed(db, false);
-    }
-
     let rc = unpack_columns_vtab::create_module(db).unwrap_or(sqlite::ResultCode::ERROR);
-    if rc != ResultCode::OK {
-        return init_failed(db, false);
-    }
-
-    let rc = create_cl_set_vtab::create_module(db).unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
         return init_failed(db, false);
     }
@@ -294,6 +260,43 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     if rc != ResultCode::OK {
         // SQLite already ran the destructor.
         return init_failed(db, false);
+    }
+
+    let rc = db
+        .create_function_v2(
+            "crsql_automigrate",
+            -1,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
+            Some(ext_data as *mut c_void),
+            Some(crsql_automigrate),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        return init_failed_with_ext_data(db, ext_data);
+    }
+
+    let rc = db
+        .create_function_v2(
+            "crsql_as_table",
+            1,
+            sqlite::UTF8 | sqlite::DIRECTONLY,
+            Some(ext_data as *mut c_void),
+            Some(crsql_as_table),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        return init_failed_with_ext_data(db, ext_data);
+    }
+
+    let rc = create_cl_set_vtab::create_module(db, ext_data).unwrap_or(ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -443,7 +446,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
             "crsql_as_crr",
             -1,
             sqlite::UTF8 | sqlite::DIRECTONLY,
-            None,
+            Some(ext_data as *mut c_void),
             Some(x_crsql_as_crr),
             None,
             None,
@@ -563,7 +566,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
             "crsql_begin_alter",
             -1,
             sqlite::UTF8 | sqlite::DIRECTONLY,
-            None,
+            Some(ext_data as *mut c_void),
             Some(x_crsql_begin_alter),
             None,
             None,
@@ -708,12 +711,15 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 /// Every function registered with ext_data as its user data, other than
 /// crsql_db_version, as (name, n_arg).
 const EXT_DATA_FUNCTIONS: &[(&str, c_int)] = &[
+    ("crsql_automigrate", -1),
+    ("crsql_as_table", 1),
     ("crsql_update_site_id", 2),
     ("crsql_site_id", 0),
     ("crsql_next_db_version", -1),
     ("crsql_peek_next_db_version", 0),
     ("crsql_increment_and_get_seq", 0),
     ("crsql_get_seq", 0),
+    ("crsql_as_crr", -1),
     ("crsql_set_ts", 1),
     ("crsql_cache_site_ordinal", 1),
     ("crsql_cache_pk_cl", 2),
@@ -721,6 +727,7 @@ const EXT_DATA_FUNCTIONS: &[(&str, c_int)] = &[
     ("crsql_test_mark_init_failed", 0),
     ("crsql_set_db_version", -1),
     ("crsql_get_ts", -1),
+    ("crsql_begin_alter", -1),
     ("crsql_commit_alter", -1),
     ("crsql_finalize", -1),
     ("crsql_after_update", -1),
@@ -735,15 +742,11 @@ const EXT_DATA_FUNCTIONS: &[(&str, c_int)] = &[
 /// (name, n_arg).
 const CORE_FUNCTIONS: &[(&str, c_int)] = &[
     ("crsql_set_debug", 1),
-    ("crsql_automigrate", -1),
     ("crsql_pack_columns", -1),
-    ("crsql_as_table", 1),
     ("crsql_internal_sync_bit", 0),
     ("crsql_internal_sync_bit", 1),
     ("crsql_sha", 0),
     ("crsql_version", 0),
-    ("crsql_as_crr", -1),
-    ("crsql_begin_alter", -1),
 ];
 
 const CORE_MODULES: &[&str] = &["crsql_unpack_columns", "clset"];
@@ -889,6 +892,9 @@ unsafe extern "C" fn x_crsql_as_crr(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error(
             "Wrong number of args provided to crsql_as_crr. Provide the schema
@@ -951,6 +957,9 @@ unsafe extern "C" fn x_crsql_begin_alter(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error(
             "Wrong number of args provided to crsql_begin_alter. Provide the

@@ -33,6 +33,9 @@ pub extern "C" fn crsql_automigrate(
     argc: c_int,
     argv: *mut *mut sqlite::value,
 ) {
+    if crate::ext_data::reject_if_init_failed(ctx) {
+        return;
+    }
     if argc < 1 {
         ctx.result_error("Had no args. Expected a schema to migrate to");
         return;
