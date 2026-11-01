@@ -209,11 +209,14 @@ def test_changes_order_by_untranslatable_column():
 
 
 def test_empty_site_id_merge_updates_cl_cache():
-    """Empty site_id merges leave a stale cl cache."""
+    """The cl cache was only updated for merges that
+    recorded a db_version, so a delete left a stale cl cache and an older cl change then
+    resurrected the row. Empty site_ids are now rejected (test_site_id_and_load_failure.py); the cl
+    cache must still be updated for every winning merge."""
     c = make_two_row_db()
     c.execute("BEGIN")
-    # delete (cl 2) with an empty site id
-    merge(c, ('t', PK_1, '-1', None, 2, 5, b'', 2, 0, '0'))
+    # delete (cl 2)
+    merge(c, ('t', PK_1, '-1', None, 2, 5, SITE_2, 2, 0, '0'))
     assert c.execute("SELECT id FROM t WHERE id = 1").fetchall() == []
     # an older cl=1 change must be ignored, not resurrect the row
     merge(c, ('t', PK_1, 'w', 'zzz', 9, 4, SITE_1, 1, 0, '0'))
@@ -223,17 +226,19 @@ def test_empty_site_id_merge_updates_cl_cache():
 
 
 def test_empty_site_id_merge_tie_break():
-    """Empty site_id writes a NULL clock site_id which
-    later fails a mergeEqualValues tie with 'clock table might be corrupt'."""
+    """An empty site_id wrote a NULL clock site_id
+    which later failed a mergeEqualValues tie with 'clock table might be corrupt'. Empty
+    and NULL site_ids are now rejected, so no such clock row can be written."""
     c = connect(":memory:")
     c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL, v)")
     c.execute("SELECT crsql_as_crr('t')")
     c.execute("SELECT crsql_config_set('merge-equal-values', 1)")
     c.commit()
-    merge(c, ('t', PK_1, 'v', 'x', 1, 1, b'', 1, 0, '0'))
-    c.commit()
-    # site ordinal must be the local one (0), like local writes, never NULL
-    assert c.execute("SELECT site_id FROM t__crsql_clock WHERE col_name = 'v'").fetchall() == [(0,)]
+    for site_id in (b'', None):
+        with pytest.raises(sqlite3.Error, match="site_id must be a non-empty blob"):
+            merge(c, ('t', PK_1, 'v', 'x', 1, 1, site_id, 1, 0, '0'))
+        c.rollback()
+    assert c.execute("SELECT count(*) FROM t__crsql_clock").fetchone()[0] == 0
     merge(c, ('t', PK_1, 'v', 'x', 1, 1, SITE_1, 1, 0, '0'))
     c.commit()
     assert c.execute("SELECT v FROM t").fetchall() == [('x',)]

@@ -293,6 +293,31 @@ fn test_get_or_set_pk_cl() -> Result<(), ResultCode> {
     Ok(())
 }
 
+// crsql_cache_pk_cl looks tables up case-insensitively, like everything
+// else that takes a table name (lib.rs x_crsql_cache_pk_cl).
+fn test_cache_pk_cl_table_name_case() -> Result<(), ResultCode> {
+    let c = crate::opendb().expect("db opened");
+    let db = &c.db;
+    db.db
+        .exec_safe("CREATE TABLE foo (a primary key not null, b);")?;
+    db.db.exec_safe("SELECT crsql_as_crr('foo');")?;
+
+    let get_pk_key_stmt = db
+        .db
+        .prepare_v2("SELECT __crsql_key from foo__crsql_pks where a = ?;")?;
+    let get_cache_cl_stmt = db.db.prepare_v2("SELECT crsql_cache_pk_cl(?, ?);")?;
+
+    db.db.exec_safe("BEGIN TRANSACTION;")?;
+    let pk: [u8; 3] = [1, 9, 1];
+    insert_crsql_changes_row(db.db, &pk, "b", "e", 1, 1, 3)?;
+    let key = get_pk_key(&get_pk_key_stmt, 1)?;
+    assert_eq!(3, get_cache_cl(&get_cache_cl_stmt, "foo", key)?);
+    assert_eq!(3, get_cache_cl(&get_cache_cl_stmt, "FOO", key)?);
+    db.db.exec_safe("COMMIT;")?;
+
+    Ok(())
+}
+
 fn insert_crsql_changes_row(
     db: *mut sqlite::sqlite3,
     pk: &[u8],
@@ -736,6 +761,8 @@ pub fn run_suite() -> Result<(), String> {
     test_get_or_set_site_ordinal()
         .map_err(|e| format!("test_get_or_set_site_ordinal failed: {:?}", e))?;
     test_get_or_set_pk_cl().map_err(|e| format!("test_get_or_set_pk_cl failed: {:?}", e))?;
+    test_cache_pk_cl_table_name_case()
+        .map_err(|e| format!("test_cache_pk_cl_table_name_case failed: {:?}", e))?;
     test_insert_db_version_cache()
         .map_err(|e| format!("test_insert_db_version_cache failed: {:?}", e))?;
     test_savepoint_rollback_after_first_write()
