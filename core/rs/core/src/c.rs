@@ -76,6 +76,7 @@ pub struct crsql_ExtData {
     pub ordinalMap: *mut ::core::ffi::c_void,
     pub pVersionGuardStmt: *mut sqlite::stmt,
     pub versionGuardEnlisted: ::core::ffi::c_int,
+    pub initFailed: ::core::ffi::c_int,
     pub rowsImpactedSavepoints: *mut ::core::ffi::c_void,
 }
 
@@ -536,6 +537,11 @@ fn bindgen_test_layout_crsql_ExtData() {
         unsafe { ::core::ptr::addr_of!((*ptr).versionGuardEnlisted) as usize - ptr as usize },
         176usize,
         "Offset of versionGuardEnlisted"
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).initFailed) as usize - ptr as usize },
+        180usize,
+        "Offset of initFailed"
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).rowsImpactedSavepoints) as usize - ptr as usize },

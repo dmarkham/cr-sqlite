@@ -51,6 +51,10 @@ struct crsql_ExtData {
   void *ordinalMap;
   sqlite3_stmt *pVersionGuardStmt;
   int versionGuardEnlisted;
+  // Set when the extension failed to initialize on this connection. Functions
+  // SQLite refused to drop stay registered with this ext data (whose
+  // statements are finalized by then) and must refuse to run.
+  int initFailed;
   // rowsImpacted as it was when each open savepoint level was opened, so that
   // a ROLLBACK TO can restore it. Owned by rust (see changes_vtab.rs).
   void *rowsImpactedSavepoints;

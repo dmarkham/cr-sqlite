@@ -29,7 +29,7 @@ static void closeHook(void *pUserData, sqlite3 *db) {
 
 void *sqlite3_crsqlrustbundle_init(sqlite3 *db, char **pzErrMsg,
                                    const sqlite3_api_routines *pApi);
-void crsql_rustbundle_unregister(sqlite3 *db);
+void crsql_rustbundle_unregister(sqlite3 *db, void *pExtData);
 
 #ifdef _WIN32
 __declspec(dllexport)
@@ -74,7 +74,7 @@ __declspec(dllexport)
     crsql_finalize(pExtData);
     sqlite3_create_module_v2(db, "crsql_changes", 0, 0, 0);
     sqlite3_create_module_v2(db, "crsql_version_guard", 0, 0, 0);
-    crsql_rustbundle_unregister(db);
+    crsql_rustbundle_unregister(db, pExtData);
     return rc;
   }
 

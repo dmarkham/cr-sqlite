@@ -5,7 +5,7 @@ use core::ffi::c_int;
 use core::ptr::null_mut;
 
 use alloc::string::String;
-use sqlite::{sqlite3, Connection, ResultCode, Stmt};
+use sqlite::{sqlite3, Connection, Context, ResultCode, Stmt};
 use sqlite_nostd as sqlite;
 
 use crate::{
@@ -107,4 +107,22 @@ pub fn recreate_db_version_stmt(
     }
 
     Ok(ResultCode::OK)
+}
+
+pub const INIT_FAILED: &str = "crsqlite failed to initialize on this connection";
+
+/**
+ * Init can fail after registering functions that SQLite then refuses to drop
+ * (see crsql_unregister). They stay callable, with an ext_data whose
+ * statements were finalized, so every function registered with ext_data as
+ * its user data calls this first. Sets the error and returns true when init
+ * failed.
+ */
+pub fn reject_if_init_failed(ctx: *mut sqlite::context) -> bool {
+    let ext_data = ctx.user_data() as *mut crsql_ExtData;
+    if unsafe { (*ext_data).initFailed } != 0 {
+        ctx.result_error(INIT_FAILED);
+        return true;
+    }
+    false
 }

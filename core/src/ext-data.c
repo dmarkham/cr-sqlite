@@ -78,6 +78,7 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db) {
   pExtData->rowsImpactedSavepoints = 0;
   pExtData->pVersionGuardStmt = 0;
   pExtData->versionGuardEnlisted = 0;
+  pExtData->initFailed = 0;
   pExtData->rowsImpacted = 0;
   pExtData->updatedTableInfosThisTx = 0;
   crsql_init_table_info_vec(pExtData);

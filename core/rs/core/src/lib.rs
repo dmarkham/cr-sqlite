@@ -62,6 +62,7 @@ use automigrate::*;
 use backfill::*;
 use c::{crsql_freeExtData, crsql_initSiteIdExt, crsql_newExtData};
 use config::{crsql_config_get, crsql_config_set};
+use ext_data::reject_if_init_failed;
 use core::ffi::{c_int, c_void, CStr};
 use create_crr::{check_schema_is_main, create_crr};
 use db_version::{crsql_next_db_version, crsql_peek_next_db_version, insert_db_version};
@@ -308,12 +309,12 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let site_id_buffer = sqlite::malloc(consts::SITE_ID_LEN as usize);
     if site_id_buffer.is_null() {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
     unsafe {
         core::ptr::copy_nonoverlapping(site_id.as_ptr(), site_id_buffer, site_id.len());
@@ -322,7 +323,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     // From here on ext_data owns site_id_buffer and frees it with itself.
     let rc = unsafe { crsql_initSiteIdExt(db, ext_data, site_id_buffer as *mut c_char) };
     if rc != ResultCode::OK as c_int {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -338,7 +339,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -354,7 +355,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -370,7 +371,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -386,7 +387,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -402,7 +403,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -418,7 +419,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -434,7 +435,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -450,7 +451,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -466,7 +467,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     #[cfg(feature = "test")]
@@ -480,7 +481,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     #[cfg(feature = "test")]
@@ -494,7 +495,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     #[cfg(feature = "test")]
@@ -508,7 +509,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         None,
         None,
     ) {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -524,7 +525,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -540,7 +541,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -556,7 +557,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -572,7 +573,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -588,7 +589,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -604,7 +605,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -620,7 +621,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -636,7 +637,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -652,7 +653,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -668,7 +669,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     let rc = db
@@ -684,7 +685,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         )
         .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
-        return init_failed(db, true);
+        return init_failed_with_ext_data(db, ext_data);
     }
 
     return ext_data as *mut c_void;
@@ -737,6 +738,24 @@ fn init_failed(db: *mut sqlite::sqlite3, owns_ext_data: bool) -> *mut c_void {
     null_mut()
 }
 
+/// init_failed once crsql_db_version owns ext_data.
+fn init_failed_with_ext_data(
+    db: *mut sqlite::sqlite3,
+    ext_data: *mut c::crsql_ExtData,
+) -> *mut c_void {
+    crsql_mark_init_failed(ext_data as *mut c_void);
+    init_failed(db, true)
+}
+
+/// Marks ext_data as belonging to a failed init. Whatever crsql_unregister
+/// cannot drop keeps it as user data and then refuses to run
+/// (see reject_if_init_failed).
+pub fn crsql_mark_init_failed(ext_data: *mut c_void) {
+    unsafe {
+        (*(ext_data as *mut c::crsql_ExtData)).initFailed = 1;
+    }
+}
+
 /// Drops every function and module sqlite3_crsqlcore_init registers. When
 /// init fails SQLite unloads the extension while the connection stays
 /// usable, so nothing may be left pointing at our code or at ext_data.
@@ -777,6 +796,9 @@ unsafe extern "C" fn x_crsql_site_id(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let site_id = (*ext_data).siteId;
     sqlite::result_blob(ctx, site_id, consts::SITE_ID_LEN, Destructor::STATIC);
@@ -792,6 +814,9 @@ unsafe extern "C" fn x_crsql_update_site_id(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let args = sqlite::args!(argc, argv);
     let site_id = args[0].blob();
@@ -898,6 +923,9 @@ unsafe extern "C" fn x_crsql_rows_impacted(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let rows_impacted = (*ext_data).rowsImpacted;
     sqlite::result_int(ctx, rows_impacted);
@@ -949,6 +977,9 @@ unsafe extern "C" fn x_crsql_commit_alter(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error(
             "Wrong number of args provided to crsql_commit_alter. Provide the
@@ -1076,6 +1107,9 @@ unsafe extern "C" fn x_crsql_get_seq(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     ctx.result_int((*ext_data).seq);
 }
@@ -1085,6 +1119,9 @@ unsafe extern "C" fn x_crsql_increment_and_get_seq(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     ctx.result_int((*ext_data).seq);
     (*ext_data).seq += 1;
@@ -1098,6 +1135,9 @@ unsafe extern "C" fn x_crsql_set_ts(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error("Wrong number of args provided to x_crsql_set_ts. Provide the timestamp.");
         return;
@@ -1134,6 +1174,9 @@ unsafe extern "C" fn x_crsql_cache_site_ordinal(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error(
             "Wrong number of args provided to crsql_cache_site_ordinal. Provide the site id.",
@@ -1162,6 +1205,9 @@ unsafe extern "C" fn x_crsql_cache_pk_cl(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc < 2 {
         ctx.result_error(
             "Wrong number of args provided to crsql_cache_pk_cl. Provide the table name and pk key.",
@@ -1197,6 +1243,9 @@ unsafe extern "C" fn x_crsql_cache_db_version(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc == 0 {
         ctx.result_error(
             "Wrong number of args provided to crsql_cache_db_version. Provide the site id.",
@@ -1223,6 +1272,9 @@ unsafe extern "C" fn x_crsql_get_ts(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let ts = (*ext_data).timestamp.to_string();
     ctx.result_text_transient(&ts);
@@ -1238,6 +1290,9 @@ unsafe extern "C" fn x_crsql_db_version(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let db = ctx.db_handle();
     if let Err(message) = ext_data::refresh_connection_state_if_needed(db, ext_data) {
@@ -1262,6 +1317,9 @@ unsafe extern "C" fn x_crsql_next_db_version(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let db = ctx.db_handle();
     let mut err_msg = null_mut();
@@ -1290,6 +1348,9 @@ unsafe extern "C" fn x_crsql_set_db_version(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     if argc < 2 {
         ctx.result_error(
             "Wrong number of args provided to crsql_set_db_version. Provide the
@@ -1321,6 +1382,9 @@ unsafe extern "C" fn x_crsql_peek_next_db_version(
     _argc: i32,
     _argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let db = ctx.db_handle();
     let mut err_msg = null_mut();

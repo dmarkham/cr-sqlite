@@ -5,6 +5,7 @@ use sqlite_nostd as sqlite;
 use sqlite_nostd::{ColumnType, ManagedStmt, ResultCode, Value};
 
 use crate::c::{crsql_ExtData, crsql_enlist_version_guard};
+use crate::ext_data::reject_if_init_failed;
 
 pub const MERGE_EQUAL_VALUES: &str = "merge-equal-values";
 
@@ -34,6 +35,9 @@ pub extern "C" fn crsql_config_set(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let args = sqlite::args!(argc, argv);
 
     let name = args[0].text();
@@ -107,6 +111,9 @@ pub extern "C" fn crsql_config_get(
     argc: i32,
     argv: *mut *mut sqlite::value,
 ) {
+    if reject_if_init_failed(ctx) {
+        return;
+    }
     let args = sqlite::args!(argc, argv);
 
     let name = args[0].text();

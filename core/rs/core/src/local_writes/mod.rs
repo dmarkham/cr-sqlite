@@ -36,6 +36,9 @@ where
 
     let values = sqlite::args!(argc, argv);
     let ext_data = sqlite::user_data(ctx) as *mut crsql_ExtData;
+    if unsafe { (*ext_data).initFailed } != 0 {
+        return Err(crate::ext_data::INIT_FAILED.to_string());
+    }
     let mut inner_err: *mut c_char = core::ptr::null_mut();
     let outer_err: *mut *mut c_char = &mut inner_err;
 
