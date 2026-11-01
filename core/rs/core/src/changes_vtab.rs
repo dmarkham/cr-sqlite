@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::ffi::{c_char, c_int, CStr};
+use core::ffi::{c_char, c_int, c_void, CStr};
 use core::mem::{self, forget};
 use core::ptr::null_mut;
 
@@ -19,7 +19,8 @@ use sqlite_nostd as sqlite;
 use sqlite_nostd::ResultCode;
 
 use crate::c::{
-    crsql_Changes_cursor, crsql_Changes_vtab, ChangeRowType, ClockUnionColumn, CrsqlChangesColumn,
+    crsql_Changes_cursor, crsql_Changes_vtab, crsql_ExtData, ChangeRowType, ClockUnionColumn,
+    CrsqlChangesColumn,
 };
 use crate::changes_vtab_read::changes_union_query;
 use crate::pack_columns::bind_package_to_stmt;
@@ -566,11 +567,44 @@ pub extern "C" fn crsql_changes_begin(_vtab: *mut sqlite::vtab) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn crsql_changes_commit(vtab: *mut sqlite::vtab) -> c_int {
+pub extern "C" fn crsql_init_rows_impacted_savepoints(ext_data: *mut crsql_ExtData) {
+    let levels: Vec<c_int> = Vec::new();
+    unsafe { (*ext_data).rowsImpactedSavepoints = Box::into_raw(Box::new(levels)) as *mut c_void }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_drop_rows_impacted_savepoints(ext_data: *mut crsql_ExtData) {
+    unsafe {
+        if !(*ext_data).rowsImpactedSavepoints.is_null() {
+            drop(Box::from_raw(
+                (*ext_data).rowsImpactedSavepoints as *mut Vec<c_int>,
+            ));
+            (*ext_data).rowsImpactedSavepoints = null_mut();
+        }
+    }
+}
+
+/// rowsImpacted as it was when each open savepoint level was opened.
+fn rows_impacted_savepoints(vtab: *mut sqlite::vtab) -> mem::ManuallyDrop<Box<Vec<c_int>>> {
+    let tab = vtab.cast::<crsql_Changes_vtab>();
+    unsafe {
+        mem::ManuallyDrop::new(Box::from_raw(
+            (*(*tab).pExtData).rowsImpactedSavepoints as *mut Vec<c_int>,
+        ))
+    }
+}
+
+fn reset_rows_impacted(vtab: *mut sqlite::vtab) {
     let tab = vtab.cast::<crsql_Changes_vtab>();
     unsafe {
         (*(*tab).pExtData).rowsImpacted = 0;
     }
+    rows_impacted_savepoints(vtab).clear();
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_changes_commit(vtab: *mut sqlite::vtab) -> c_int {
+    reset_rows_impacted(vtab);
     ResultCode::OK as c_int
 }
 
@@ -578,20 +612,31 @@ pub extern "C" fn crsql_changes_commit(vtab: *mut sqlite::vtab) -> c_int {
 // reset by the rollback hook.
 #[no_mangle]
 pub extern "C" fn crsql_changes_rollback(vtab: *mut sqlite::vtab) -> c_int {
+    reset_rows_impacted(vtab);
+    ResultCode::OK as c_int
+}
+
+// Remember rowsImpacted at savepoint level `n` so that a ROLLBACK TO can
+// restore it. SQLite calls this for every savepoint (and statement journal)
+// opened while the vtab is part of the transaction, and once more for the
+// innermost open level when the vtab joins. Levels below that were opened
+// before the vtab joined, i.e. before anything was merged: they record 0.
+#[no_mangle]
+pub extern "C" fn crsql_changes_savepoint(vtab: *mut sqlite::vtab, n: c_int) -> c_int {
     let tab = vtab.cast::<crsql_Changes_vtab>();
-    unsafe {
-        (*(*tab).pExtData).rowsImpacted = 0;
-    }
+    let current = unsafe { (*(*tab).pExtData).rowsImpacted };
+    let mut levels = rows_impacted_savepoints(vtab);
+    let n = n.max(0) as usize;
+    levels.truncate(n);
+    levels.resize(n, 0);
+    levels.push(current);
     ResultCode::OK as c_int
 }
 
+// Released levels are merged into the enclosing one: their rows stay counted.
 #[no_mangle]
-pub extern "C" fn crsql_changes_savepoint(_vtab: *mut sqlite::vtab, _n: c_int) -> c_int {
-    ResultCode::OK as c_int
-}
-
-#[no_mangle]
-pub extern "C" fn crsql_changes_release(_vtab: *mut sqlite::vtab, _n: c_int) -> c_int {
+pub extern "C" fn crsql_changes_release(vtab: *mut sqlite::vtab, n: c_int) -> c_int {
+    rows_impacted_savepoints(vtab).truncate(n.max(0) as usize);
     ResultCode::OK as c_int
 }
 
@@ -599,8 +644,26 @@ pub extern "C" fn crsql_changes_release(_vtab: *mut sqlite::vtab, _n: c_int) -> 
 // SQLite also calls this when a statement that wrote to crsql_changes fails
 // inside an open transaction, so it covers statement rollbacks too.
 #[no_mangle]
-pub extern "C" fn crsql_changes_rollback_to(vtab: *mut sqlite::vtab, _: c_int) -> c_int {
+pub extern "C" fn crsql_changes_rollback_to(vtab: *mut sqlite::vtab, n: c_int) -> c_int {
     let tab = vtab.cast::<crsql_Changes_vtab>();
+
+    // Merges undone by the rollback no longer count. Level `n` stays open.
+    {
+        let mut levels = rows_impacted_savepoints(vtab);
+        let restored = if n < 0 {
+            levels.clear();
+            Some(0)
+        } else {
+            let restored = levels.get(n as usize).copied();
+            levels.truncate(n as usize + 1);
+            restored
+        };
+        if let Some(count) = restored {
+            unsafe {
+                (*(*tab).pExtData).rowsImpacted = count;
+            }
+        }
+    }
 
     let mut ordinals = unsafe {
         mem::ManuallyDrop::new(Box::from_raw(

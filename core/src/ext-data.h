@@ -51,6 +51,9 @@ struct crsql_ExtData {
   void *ordinalMap;
   sqlite3_stmt *pVersionGuardStmt;
   int versionGuardEnlisted;
+  // rowsImpacted as it was when each open savepoint level was opened, so that
+  // a ROLLBACK TO can restore it. Owned by rust (see changes_vtab.rs).
+  void *rowsImpactedSavepoints;
 };
 
 crsql_ExtData *crsql_newExtData(sqlite3 *db);
