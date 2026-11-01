@@ -144,7 +144,18 @@ sqlite3_module crsql_versionGuardModule = {
     .xRollback = versionGuardEnd,
 };
 
+// Outside of a write transaction in autocommit mode (e.g. a bare
+// `SELECT crsql_next_db_version()`) the guard INSERT would open and commit a
+// transaction of its own before returning, leaving nothing to enlist in.
+static int hasTransactionToEnlistIn(sqlite3 *db) {
+  return !sqlite3_get_autocommit(db) ||
+         sqlite3_txn_state(db, 0) == SQLITE_TXN_WRITE;
+}
+
 int crsql_enlist_db_version(sqlite3 *db, crsql_ExtData *extData) {
+  // No writes are being versioned without a transaction, so leave the guard
+  // alone and let the caller hand out the version without reserving it.
+  if (!hasTransactionToEnlistIn(db)) return SQLITE_OK;
   if (!extData->pVersionGuardStmt) {
     int rc = sqlite3_prepare_v3(
         db, "INSERT INTO crsql_version_guard VALUES (NULL)", -1,
@@ -152,11 +163,14 @@ int crsql_enlist_db_version(sqlite3 *db, crsql_ExtData *extData) {
     if (rc != SQLITE_OK) return rc;
   }
   sqlite3_stmt *stmt = extData->pVersionGuardStmt;
+  // Set before stepping so that, should the INSERT ever commit on its own,
+  // that commit's xSync still persists the pending version and xCommit clears
+  // the flag again instead of leaving it set with no transaction behind it.
+  extData->versionGuardEnlisted = 1;
   int rc = sqlite3_step(stmt);
   int result = rc == SQLITE_DONE ? SQLITE_OK : rc;
   rc = sqlite3_reset(stmt);
-  if (result != SQLITE_OK) return result;
-  if (rc != SQLITE_OK) return rc;
-  extData->versionGuardEnlisted = 1;
-  return SQLITE_OK;
+  if (result == SQLITE_OK) result = rc;
+  if (result != SQLITE_OK) extData->versionGuardEnlisted = 0;
+  return result;
 }

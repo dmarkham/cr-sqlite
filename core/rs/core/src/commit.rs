@@ -33,6 +33,9 @@ pub unsafe extern "C" fn crsql_rollback_hook(user_data: *mut c_void) {
 
 pub unsafe fn commit_or_rollback_reset(ext_data: *mut crsql_ExtData) {
     (*ext_data).pendingDbVersion = -1;
+    // The commit hook runs after the guard's xSync, so the pending version
+    // has been persisted by now; never let the flag outlive its transaction.
+    (*ext_data).versionGuardEnlisted = 0;
     (*ext_data).seq = 0;
     (*ext_data).timestamp = 0;
     (*ext_data).updatedTableInfosThisTx = 0;

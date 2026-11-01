@@ -76,6 +76,11 @@ pub fn next_db_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Result
             (*ext_data).versionGuardEnlisted = 0;
             return Err("failed to enlist db_version guard".into());
         }
+        if (*ext_data).versionGuardEnlisted == 0 {
+            // No write transaction to enlist in (autocommit read): nothing
+            // will be written under this version, so don't reserve it.
+            (*ext_data).pendingDbVersion = -1;
+        }
         Ok(ret)
     }
 }
