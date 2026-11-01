@@ -48,6 +48,7 @@ mod triggers;
 mod unpack_columns_vtab;
 mod util;
 
+use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::ToString;
 use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
@@ -735,6 +736,27 @@ unsafe extern "C" fn x_crsql_finalize(
     ctx.result_text_static("finalized");
 }
 
+/// Reads the `[schema_name,] table_name` arguments of crsql_as_crr,
+/// crsql_begin_alter and crsql_commit_alter. NULL or empty names are
+/// rejected: they can never name a table.
+fn schema_and_table_args(
+    args: &[*mut sqlite::value],
+    has_schema: bool,
+) -> Result<(&str, &str), &'static str> {
+    let is_valid = |v: &*mut sqlite::value| v.value_type() != sqlite::ColumnType::Null && v.bytes() > 0;
+    if has_schema {
+        if !is_valid(&args[0]) || !is_valid(&args[1]) {
+            return Err("The schema name and table name must be non-empty text");
+        }
+        Ok((args[0].text(), args[1].text()))
+    } else {
+        if !is_valid(&args[0]) {
+            return Err("The table name must be non-empty text");
+        }
+        Ok(("main", args[0].text()))
+    }
+}
+
 /**
  * Takes a table name and turns it into a CRR.
  *
@@ -754,10 +776,12 @@ unsafe extern "C" fn x_crsql_as_crr(
     }
 
     let args = sqlite::args!(argc, argv);
-    let (schema_name, table_name) = if argc == 2 {
-        (args[0].text(), args[1].text())
-    } else {
-        ("main\0", args[0].text())
+    let (schema_name, table_name) = match schema_and_table_args(args, argc == 2) {
+        Ok(names) => names,
+        Err(msg) => {
+            ctx.result_error(msg);
+            return;
+        }
     };
 
     let db = ctx.db_handle();
@@ -768,14 +792,8 @@ unsafe extern "C" fn x_crsql_as_crr(
         return;
     }
 
-    let rc = crsql_create_crr(
-        db,
-        schema_name.as_ptr() as *const c_char,
-        table_name.as_ptr() as *const c_char,
-        0,
-        0,
-        &mut err_msg as *mut _,
-    );
+    let rc = create_crr(db, schema_name, table_name, false, false, &mut err_msg as *mut _)
+        .unwrap_or_else(|rc| rc) as c_int;
     if rc != ResultCode::OK as c_int {
         sqlite::result_error(ctx, err_msg, -1);
         sqlite::result_error_code(ctx, rc);
@@ -815,10 +833,12 @@ unsafe extern "C" fn x_crsql_begin_alter(
     }
 
     let args = sqlite::args!(argc, argv);
-    let (schema_name, table_name) = if argc == 2 {
-        (args[0].text(), args[1].text())
-    } else {
-        ("main\0", args[0].text())
+    let (schema_name, table_name) = match schema_and_table_args(args, argc == 2) {
+        Ok(names) => names,
+        Err(msg) => {
+            ctx.result_error(msg);
+            return;
+        }
     };
     if let Err(msg) = check_schema_is_main(schema_name) {
         ctx.result_error(&msg);
@@ -854,10 +874,12 @@ unsafe extern "C" fn x_crsql_commit_alter(
     }
 
     let args = sqlite::args!(argc, argv);
-    let (schema_name, table_name) = if argc >= 2 {
-        (args[0].text(), args[1].text())
-    } else {
-        ("main\0", args[0].text())
+    let (schema_name, table_name) = match schema_and_table_args(args, argc >= 2) {
+        Ok(names) => names,
+        Err(msg) => {
+            ctx.result_error(msg);
+            return;
+        }
     };
 
     if let Err(msg) = check_schema_is_main(schema_name) {
@@ -893,22 +915,21 @@ unsafe extern "C" fn x_crsql_commit_alter(
             Err(rc) => rc as c_int,
         }
     } else {
-        let rc = crsql_compact_post_alter(
-            db,
-            table_name.as_ptr() as *const c_char,
-            ext_data,
-            &mut err_msg as *mut _,
-        );
+        // crsql_compact_post_alter takes a C string; a &str from SQLite is
+        // not guaranteed to be NUL-terminated.
+        let rc = match CString::new(table_name) {
+            Ok(c_table_name) => crsql_compact_post_alter(
+                db,
+                c_table_name.as_ptr(),
+                ext_data,
+                &mut err_msg as *mut _,
+            ),
+            Err(_) => ResultCode::MISUSE as c_int,
+        };
 
         if rc == ResultCode::OK as c_int {
-            crsql_create_crr(
-                db,
-                schema_name.as_ptr() as *const c_char,
-                table_name.as_ptr() as *const c_char,
-                1,
-                0,
-                &mut err_msg as *mut _,
-            )
+            create_crr(db, schema_name, table_name, true, false, &mut err_msg as *mut _)
+                .unwrap_or_else(|rc| rc) as c_int
         } else {
             rc
         }
