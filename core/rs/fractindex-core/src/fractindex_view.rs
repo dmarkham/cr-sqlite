@@ -120,7 +120,7 @@ fn create_instead_of_update_trigger(
     let base_sets_ex_order = columns
         .iter()
         .filter(|col| col != &order_by_column.text())
-        .map(|col| format!("\"{col}\" = NEW.\"{col}\"", col = col))
+        .map(|col| format!("\"{col}\" = NEW.\"{col}\"", col = escape_ident(col)))
         .collect::<Vec<_>>()
         .join(",\n");
 
@@ -152,9 +152,9 @@ fn create_instead_of_update_trigger(
           END
         WHERE {pk_predicates};
       END;",
-        table = table,
+        table = escape_ident(table),
         base_sets_ex_order = base_sets_ex_order,
-        order_col = order_by_column.text(),
+        order_col = escape_ident(order_by_column.text()),
         list_predicates = list_predicates,
         after_predicates = after_predicates,
         maybe_comma = if list_name_args.len() > 0 { ", " } else { "" },
@@ -224,7 +224,7 @@ pub fn fix_conflict_return_old_key(
         .enumerate()
         .map(|(i, pk_name)| format!("\"{}\" = ?{}", escape_ident(pk_name.text()), i + 1))
         .collect::<Vec<_>>()
-        .join(", AND");
+        .join(" AND ");
 
     // Get the order of the row that we are inserting after.
     // This row had collisions.

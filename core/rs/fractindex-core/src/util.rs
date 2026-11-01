@@ -9,9 +9,8 @@ pub fn where_predicates<T: AsRef<str>>(columns: &[T]) -> Result<String, ResultCo
     let mut predicates = String::new();
     for (i, column_name) in columns.iter().enumerate() {
         predicates.push_str(&format!(
-            "\"{}\" = NEW.\"{}\"",
-            column_name.as_ref(),
-            column_name.as_ref()
+            "\"{col}\" = NEW.\"{col}\"",
+            col = escape_ident(column_name.as_ref())
         ));
         if i < columns.len() - 1 {
             predicates.push_str(" AND ");
