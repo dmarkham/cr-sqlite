@@ -14,14 +14,6 @@ LIBSQL_EXTENSION_INIT1
 #include "ext-data.h"
 #include "version-guard.h"
 
-// see
-// https://github.com/chromium/chromium/commit/579b3dd0ea41a40da8a61ab87a8b0bc39e158998
-// & https://github.com/rust-lang/rust/issues/73632 &
-// https://sourcegraph.com/github.com/chromium/chromium/-/commit/579b3dd0ea41a40da8a61ab87a8b0bc39e158998?visible=1
-#ifdef CRSQLITE_WASM
-unsigned char __rust_no_alloc_shim_is_unstable;
-#endif
-
 int crsql_compact_post_alter(sqlite3 *db, const char *tblName,
                              crsql_ExtData *pExtData, char **errmsg);
 

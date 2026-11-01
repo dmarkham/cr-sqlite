@@ -42,12 +42,6 @@ fn panic(info: &PanicInfo) -> ! {
 #[lang = "eh_personality"]
 extern "C" fn eh_personality() {}
 
-#[cfg(target_family = "wasm")]
-#[no_mangle]
-pub fn __rust_alloc_error_handler(_: Layout) -> ! {
-    core::intrinsics::abort()
-}
-
 #[no_mangle]
 pub extern "C" fn sqlite3_crsqlrustbundle_init(
     db: *mut sqlite::sqlite3,
