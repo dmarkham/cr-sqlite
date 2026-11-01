@@ -394,3 +394,42 @@ def test_build_config():
     assert "sqlite3_crsqlite_init" in exported
     assert not any(s.startswith("__rust") or s.startswith("_ZN") for s in exported), \
         sorted(s for s in exported if s.startswith("__rust") or s.startswith("_ZN"))
+
+
+def test_init_failure_unsupported_version_leaves_no_registrations(tmp_path):
+    """When init fails after functions are
+    registered (here crsql_maybe_update_db rejects a db written by an
+    unsupported cr-sqlite version), SQLite unloads the .so, but functions
+    registered earlier (crsql_internal_sync_bit with its crsql_sqlite_free
+    destructor, crsql_set_debug, ...) still pointed into the unloaded code,
+    so using or closing the connection crashed."""
+    import sqlite3
+    path = str(tmp_path / "old_version.db")
+    c = connect(path)
+    close(c)
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "UPDATE crsql_master SET value = 1 WHERE key = 'crsqlite_version'")
+    raw.commit()
+    raw.close()
+    p = run_py("""
+        c = sqlite3.connect(os.environ["CRSQL_DB"])
+        c.enable_load_extension(True)
+        try:
+            c.load_extension(EXT)
+            print(repr(("loaded", "")))
+        except Exception as e:
+            print(repr(("failed", str(e))))
+        print(repr(err(c, "SELECT crsql_internal_sync_bit()")))
+        print(repr(err(c, "SELECT crsql_set_debug(0)")))
+        print(repr(err(c, "SELECT crsql_fract_key_between(NULL, NULL)")))
+        c.close()
+        print(repr(("closed", "")))
+    """, env={"CRSQL_DB": path})
+    assert p.returncode == 0, p.stdout + p.stderr
+    lines = [eval(l) for l in p.stdout.strip().splitlines()]
+    assert lines[0][0] == "failed"
+    assert "not supported" in lines[0][1]
+    for status, msg in lines[1:4]:
+        assert status == "ERR" and "no such function" in msg, msg
+    assert lines[4][0] == "closed"
