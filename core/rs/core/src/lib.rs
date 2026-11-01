@@ -913,16 +913,21 @@ unsafe extern "C" fn x_crsql_commit_alter(
         rc
     };
     if rc != ResultCode::OK as c_int {
-        // TODO: use err_msg
         let error_str = if !err_msg.is_null() {
             unsafe { CStr::from_ptr(err_msg).to_string_lossy() }
         } else {
-            Cow::Borrowed("Hello World")
+            // nothing more specific was recorded, fall back to the connection's last error
+            Cow::Owned(format!(
+                "{} (code {})",
+                db.errmsg().unwrap_or_default(),
+                rc
+            ))
         };
         ctx.result_error(&format!(
             "failed compacting tables post alteration: {}",
             error_str
         ));
+        sqlite::result_error_code(ctx, rc);
         // undo to the savepoint crsql_begin_alter opened (if any), not the caller's transaction
         let _ = db.exec_safe("ROLLBACK TO alter_crr; RELEASE alter_crr;");
         return;

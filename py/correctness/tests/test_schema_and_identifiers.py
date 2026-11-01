@@ -235,6 +235,11 @@ def test_identifier_quoting_pk_col_commit_alter():
     c.execute("SELECT crsql_commit_alter('t')")
     c.execute("UPDATE t SET y = 2")
     assert ('y', 2) in c.execute("SELECT cid, val FROM crsql_changes").fetchall()
+
+    # failures used to be reported with a placeholder text
+    with pytest.raises(sqlite3.Error, match="no such table") as e:
+        c.execute("SELECT crsql_commit_alter('nope')")
+    assert "Hello World" not in str(e.value)
     close(c)
 
 
