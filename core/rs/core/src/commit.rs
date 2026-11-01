@@ -28,7 +28,12 @@ pub unsafe extern "C" fn crsql_commit_hook(user_data: *mut c_void) -> c_int {
 // staticlib WASM build. Return void to match.
 #[no_mangle]
 pub unsafe extern "C" fn crsql_rollback_hook(user_data: *mut c_void) {
-    commit_or_rollback_reset(user_data as *mut crsql_ExtData);
+    let ext_data = user_data as *mut crsql_ExtData;
+    commit_or_rollback_reset(ext_data);
+    // The rollback may have undone writes whose effect is cached in ExtData
+    // (e.g. crsql_config_set). Forget the cached data version so the next
+    // refresh_connection_state_if_needed reloads it all from the database.
+    (*ext_data).pragmaDataVersion = -1;
 }
 
 pub unsafe fn commit_or_rollback_reset(ext_data: *mut crsql_ExtData) {

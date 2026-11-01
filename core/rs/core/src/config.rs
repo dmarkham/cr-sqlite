@@ -4,7 +4,7 @@ use sqlite::{Connection, Context};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{ColumnType, ManagedStmt, ResultCode, Value};
 
-use crate::c::crsql_ExtData;
+use crate::c::{crsql_ExtData, crsql_enlist_version_guard};
 
 pub const MERGE_EQUAL_VALUES: &str = "merge-equal-values";
 
@@ -16,11 +16,11 @@ pub fn reload_connection_config(
         .prepare_v2("SELECT value FROM crsql_master WHERE key = 'config.merge-equal-values'")
         .map_err(|rc| format!("failed to prepare config refresh: {rc}"))?;
     let value = match stmt.step() {
+        // crsql_config_set only stores 0 or 1; anything else was written by
+        // hand or by an older version and falls back to the default instead
+        // of failing every refresh on this connection.
         Ok(ResultCode::ROW) => {
-            if stmt.column_type(0) != Ok(ColumnType::Integer) {
-                return Err("invalid merge-equal-values setting".into());
-            }
-            stmt.column_int(0)
+            (stmt.column_type(0) == Ok(ColumnType::Integer) && stmt.column_int(0) == 1) as i32
         }
         Ok(ResultCode::DONE) => 0,
         Ok(rc) | Err(rc) => return Err(format!("failed to read config: {rc}")),
@@ -41,8 +41,11 @@ pub extern "C" fn crsql_config_set(
     let value = match name {
         MERGE_EQUAL_VALUES => {
             let value = args[1];
-            let ext_data = ctx.user_data() as *mut crsql_ExtData;
-            unsafe { (*ext_data).mergeEqualValues = value.int() };
+            if value.value_type() != ColumnType::Integer || !matches!(value.int64(), 0 | 1) {
+                ctx.result_error("merge-equal-values must be 0 or 1");
+                ctx.result_error_code(ResultCode::ERROR);
+                return;
+            }
             value
         }
         _ => {
@@ -53,8 +56,21 @@ pub extern "C" fn crsql_config_set(
     };
 
     let db = ctx.db_handle();
+    let ext_data = ctx.user_data() as *mut crsql_ExtData;
     match insert_config_setting(db, name, value) {
         Ok((_stmt, value)) => {
+            // Enlist the version guard so a ROLLBACK TO that undoes this write
+            // makes the connection reload its config (the rollback hook covers
+            // a full ROLLBACK). Only update the cache once that is in place.
+            let rc = unsafe { crsql_enlist_version_guard(db, ext_data) };
+            if rc != ResultCode::OK as i32 {
+                // The row may be in the database regardless; reload from it.
+                unsafe { (*ext_data).pragmaDataVersion = -1 };
+                ctx.result_error("Could not persist config in database");
+                ctx.result_error_code(ResultCode::ERROR);
+                return;
+            }
+            unsafe { (*ext_data).mergeEqualValues = value.int() };
             ctx.result_value(value);
         }
         Err(rc) => {

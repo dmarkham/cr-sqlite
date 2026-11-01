@@ -123,6 +123,10 @@ extern "C" {
         db: *mut sqlite::sqlite3,
         pExtData: *mut crsql_ExtData,
     ) -> c_int;
+    pub fn crsql_enlist_version_guard(
+        db: *mut sqlite::sqlite3,
+        pExtData: *mut crsql_ExtData,
+    ) -> c_int;
 }
 
 #[test]

@@ -520,16 +520,13 @@ fn test_refresh_retries_after_reload_failure() -> Result<(), ResultCode> {
 
         b.db.exec_safe("BEGIN")?;
         b.db.exec_safe("SELECT crsql_config_set('merge-equal-values', 1)")?;
-        b.db.exec_safe(
-            "UPDATE crsql_master SET value = 'invalid' WHERE key = 'config.merge-equal-values'",
-        )?;
+        // Hide the config table so a's config reload fails.
+        b.db.exec_safe("ALTER TABLE crsql_master RENAME TO crsql_master_hidden")?;
         b.db.exec_safe("INSERT INTO t VALUES (1, 'external')")?;
         b.db.exec_safe("COMMIT")?;
 
         assert!(scalar(a.db.db, "SELECT crsql_config_get('merge-equal-values')").is_err());
-        a.db.exec_safe(
-            "UPDATE crsql_master SET value = 1 WHERE key = 'config.merge-equal-values'",
-        )?;
+        a.db.exec_safe("ALTER TABLE crsql_master_hidden RENAME TO crsql_master")?;
         assert_eq!(
             scalar(a.db.db, "SELECT crsql_config_get('merge-equal-values')")?,
             1

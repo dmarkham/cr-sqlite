@@ -103,14 +103,11 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db) {
     int colType = sqlite3_column_type(pStmt, 1);
 
     if (strcmp("merge-equal-values", (char *)name) == 0) {
-      if (colType == SQLITE_INTEGER) {
-        const int value = sqlite3_column_int(pStmt, 1);
-        pExtData->mergeEqualValues = value;
-      } else {
-        // broken setting...
-        crsql_freeExtData(pExtData);
-        return 0;
-      }
+      // crsql_config_set only stores 0 or 1. Anything else (written by hand
+      // or by an older version) keeps the default rather than making the
+      // database impossible to open; reload_connection_config agrees.
+      pExtData->mergeEqualValues =
+          colType == SQLITE_INTEGER && sqlite3_column_int(pStmt, 1) == 1;
     } else {
       // unhandled config setting
     }
