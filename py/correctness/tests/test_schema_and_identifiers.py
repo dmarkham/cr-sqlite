@@ -418,10 +418,11 @@ def test_table_name_matching_is_case_insensitive():
     c.execute("SELECT crsql_commit_alter('foo')")
     c.execute("UPDATE foo SET y = 2")
     assert ('y', 2) in c.execute("SELECT cid, val FROM crsql_changes").fetchall()
-    # as_crr under another spelling is a no-op, not a second set of triggers
+    # as_crr under another spelling sees the table is already a crr and changes nothing
+    triggers = "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'foo'"
+    before = c.execute(triggers).fetchall()
     c.execute("SELECT crsql_as_crr('Foo')")
-    assert c.execute(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'trigger'").fetchone()[0] == 3
+    assert c.execute(triggers).fetchall() == before
     close(c)
 
 

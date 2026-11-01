@@ -9,7 +9,7 @@ use sqlite_nostd::ResultCode;
 */
 pub fn is_crr(db: *mut sqlite::sqlite3, table: &str) -> Result<bool, ResultCode> {
     let stmt =
-        db.prepare_v2("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?")?;
+        db.prepare_v2("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = ? COLLATE NOCASE")?;
     stmt.bind_text(
         1,
         &format!("{}__crsql_itrig", table),

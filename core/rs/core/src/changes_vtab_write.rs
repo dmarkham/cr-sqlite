@@ -483,7 +483,7 @@ unsafe fn merge_insert(
     ));
 
     // TODO: will this work given `insert_tbl` is null termed?
-    let tbl_info_index = tbl_infos.iter().position(|x| x.tbl_name == insert_tbl);
+    let tbl_info_index = crate::tableinfo::find_table_info_index(&tbl_infos, insert_tbl);
 
     if tbl_info_index.is_none() {
         let err = CString::new(format!(

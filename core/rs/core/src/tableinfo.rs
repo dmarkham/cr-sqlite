@@ -853,6 +853,16 @@ impl Drop for ColumnInfo {
     }
 }
 
+/**
+ * Finds the table info for `table_name`. SQLite matches identifiers ASCII-case-insensitively,
+ * so `Foo` and `foo` name the same table whichever spelling crsql_as_crr was given.
+ */
+pub fn find_table_info_index(table_infos: &[TableInfo], table_name: &str) -> Option<usize> {
+    table_infos
+        .iter()
+        .position(|t| t.tbl_name.eq_ignore_ascii_case(table_name))
+}
+
 #[no_mangle]
 pub extern "C" fn crsql_init_table_info_vec(ext_data: *mut crsql_ExtData) {
     let vec: Vec<TableInfo> = vec![];

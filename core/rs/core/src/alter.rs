@@ -12,7 +12,7 @@ use sqlite_nostd::{sqlite3, Connection, ResultCode, StrRef};
 
 use crate::c::crsql_ExtData;
 use crate::ext_data::refresh_connection_state_if_needed;
-use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, TableInfo};
+use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, find_table_info_index, TableInfo};
 
 #[no_mangle]
 pub unsafe extern "C" fn crsql_compact_post_alter(
@@ -102,7 +102,7 @@ unsafe fn compact_post_alter(
         }
         let table_infos =
             mem::ManuallyDrop::new(Box::from_raw((*ext_data).tableInfos as *mut Vec<TableInfo>));
-        let table_info = table_infos.iter().find(|x| x.tbl_name == tbl_name_str);
+        let table_info = find_table_info_index(&table_infos, tbl_name_str).map(|i| &table_infos[i]);
         if table_info.is_none() {
             return Err(ResultCode::ERROR);
         }

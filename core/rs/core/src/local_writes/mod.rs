@@ -13,7 +13,9 @@ use sqlite::{Context, ManagedStmt, Value};
 use sqlite_nostd::ResultCode;
 use sqlite_nostd::{self as sqlite, changes64};
 
-use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, ColumnInfo, TableInfo};
+use crate::tableinfo::{
+    crsql_ensure_table_infos_are_up_to_date, find_table_info_index, ColumnInfo, TableInfo,
+};
 
 pub mod after_delete;
 pub mod after_insert;
@@ -48,8 +50,8 @@ where
     let mut table_infos =
         unsafe { ManuallyDrop::new(Box::from_raw((*ext_data).tableInfos as *mut Vec<TableInfo>)) };
     let table_name = values[0].text();
-    let table_info = match table_infos.iter_mut().find(|t| &(t.tbl_name) == table_name) {
-        Some(t) => t,
+    let table_info = match find_table_info_index(&table_infos, table_name) {
+        Some(idx) => &mut table_infos[idx],
         None => {
             return Err(format!("table {} not found", table_name));
         }
