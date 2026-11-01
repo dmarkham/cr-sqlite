@@ -467,6 +467,13 @@ unsafe fn merge_insert(
     }
 
     let insert_site_id = insert_site_id.blob();
+    // An empty (or NULL) site id means the change is our own: like local writes it is
+    // recorded with the local ordinal (0), so site id tie breaks must compare our site id.
+    let origin_site_id = if insert_site_id.is_empty() {
+        core::slice::from_raw_parts((*(*tab).pExtData).siteId, crate::consts::SITE_ID_LEN as usize)
+    } else {
+        insert_site_id
+    };
 
     let mut tbl_infos = mem::ManuallyDrop::new(Box::from_raw(
         (*(*tab).pExtData).tableInfos as *mut Vec<TableInfo>,
@@ -532,7 +539,7 @@ unsafe fn merge_insert(
                         &tbl_info,
                         key,
                         insert_col,
-                        insert_site_id,
+                        origin_site_id,
                         errmsg,
                     )?
                 {
@@ -545,7 +552,7 @@ unsafe fn merge_insert(
                         insert_col,
                         insert_col_vrsn,
                         insert_db_vrsn,
-                        insert_site_id,
+                        origin_site_id,
                         insert_seq,
                         insert_ts,
                     )?;
@@ -561,7 +568,7 @@ unsafe fn merge_insert(
                 key,
                 insert_col_vrsn,
                 insert_db_vrsn,
-                insert_site_id,
+                origin_site_id,
                 insert_seq,
                 insert_ts,
             );
@@ -599,7 +606,7 @@ unsafe fn merge_insert(
                 key,
                 insert_col_vrsn,
                 insert_db_vrsn,
-                insert_site_id,
+                origin_site_id,
                 insert_seq,
                 insert_ts,
             )?;
@@ -628,7 +635,7 @@ unsafe fn merge_insert(
                 key,
                 insert_cl,
                 insert_db_vrsn,
-                insert_site_id,
+                origin_site_id,
                 insert_seq,
                 insert_ts,
             )?;
@@ -652,7 +659,7 @@ unsafe fn merge_insert(
                 &unpacked_pks,
                 key,
                 insert_val,
-                insert_site_id,
+                origin_site_id,
                 insert_col,
                 insert_col_vrsn,
                 errmsg,
@@ -686,7 +693,7 @@ unsafe fn merge_insert(
             insert_col,
             insert_col_vrsn,
             insert_db_vrsn,
-            insert_site_id,
+            origin_site_id,
             insert_seq,
             insert_ts,
         );
@@ -702,8 +709,12 @@ unsafe fn merge_insert(
         }
     })();
 
+    if res.is_err() {
+        return res;
+    }
+
     // Update the received db_version whether the change won or not.
-    if res.is_ok() && !insert_site_id.is_empty() {
+    if !insert_site_id.is_empty() {
         if let Err(rc) = insert_db_version((*tab).pExtData, insert_site_id, insert_db_vrsn) {
             let err = CString::new(format!(
                 "Unable to insert db version {} for site id {:?}: {:?}",
@@ -712,11 +723,11 @@ unsafe fn merge_insert(
             *errmsg = err.into_raw();
             return Err(rc);
         }
+    }
 
-        // a bigger cl always wins
-        if insert_cl > local_cl {
-            tbl_info.set_cl(key, insert_cl);
-        }
+    // a bigger cl always wins, whoever sent it
+    if insert_cl > local_cl {
+        tbl_info.set_cl(key, insert_cl);
     }
 
     res
