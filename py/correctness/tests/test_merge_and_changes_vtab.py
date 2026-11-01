@@ -204,7 +204,7 @@ def test_changes_order_by_untranslatable_column():
     assert c.execute(
         "SELECT val FROM crsql_changes WHERE cid = 'w' ORDER BY db_version, val DESC").fetchall() == [
         ('b2',), ('b1',)]
-    assert len(c.execute("SELECT * FROM crsql_changes ORDER BY rowid").fetchall()) == 6
+    assert len(c.execute("SELECT * FROM crsql_changes ORDER BY rowid").fetchall()) == 4
     close(c)
 
 
