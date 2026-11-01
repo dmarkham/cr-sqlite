@@ -85,6 +85,18 @@ impl TableInfo {
         self.cl_cache.insert(key, cl);
     }
 
+    /**
+     * Drops the cached causal length of `key`.
+     *
+     * Local writes call this instead of caching the cl they computed: SQLite
+     * has no savepoint hook, so a cl cached by a local write could outlive a
+     * ROLLBACK TO or statement rollback that undid it. Merges cache cl
+     * themselves and clear the cache from the changes vtab's xRollbackTo.
+     */
+    pub fn invalidate_cl(&mut self, key: i64) {
+        self.cl_cache.remove(&key);
+    }
+
     pub fn clear_cl_cache(&mut self) {
         if !self.cl_cache.is_empty() {
             self.cl_cache.clear();

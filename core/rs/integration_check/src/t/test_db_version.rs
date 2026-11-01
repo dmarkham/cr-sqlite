@@ -230,13 +230,14 @@ fn test_get_or_set_pk_cl() -> Result<(), ResultCode> {
     update_foo_stmt.bind_int64(2, 2)?;
     update_foo_stmt.step()?;
 
-    // pk 1 and 2 should have a cl of 2 since they have been deleted
-    assert_eq!(2, get_cache_cl(&get_cache_cl_stmt, "foo", key1)?);
-    assert_eq!(2, get_cache_cl(&get_cache_cl_stmt, "foo", key2)?);
+    // local writes never cache cl (a cached value could outlive a ROLLBACK TO
+    // of the write); they drop any cached entry instead.
+    assert_eq!(-1, get_cache_cl(&get_cache_cl_stmt, "foo", key1)?);
+    assert_eq!(-1, get_cache_cl(&get_cache_cl_stmt, "foo", key2)?);
 
-    // reinsert pk 2, check cl is 3
+    // reinsert pk 2
     insert_foo_row(&insert_foo_stmt, 2, "d")?;
-    assert_eq!(3, get_cache_cl(&get_cache_cl_stmt, "foo", key2)?);
+    assert_eq!(-1, get_cache_cl(&get_cache_cl_stmt, "foo", key2)?);
 
     // check insert or replace updates the cache
     let insert_or_replace = db
@@ -280,6 +281,10 @@ fn test_get_or_set_pk_cl() -> Result<(), ResultCode> {
     // a lower cl should not update the cache
     insert_crsql_changes_row(db.db, &pk, "b", "e", 1, 3, 3)?;
     assert_eq!(5, get_cache_cl(&get_cache_cl_stmt, "foo", key4)?);
+
+    // a local write to the row drops the entry merges cached for it
+    db.db.exec_safe("DELETE FROM foo WHERE a = 4;")?;
+    assert_eq!(-1, get_cache_cl(&get_cache_cl_stmt, "foo", key4)?);
 
     db.db.exec_safe("ROLLBACK TO SAVEPOINT test;")?;
 

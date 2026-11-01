@@ -48,7 +48,7 @@ fn after_delete(
         .get_or_create_key_via_raw_values(db, pks_old)
         .map_err(|_| "failed getting or creating lookaside key")?;
 
-    let cl = mark_locally_deleted(db, tbl_info, key, db_version, seq, &ts)?;
+    mark_locally_deleted(db, tbl_info, key, db_version, seq, &ts)?;
 
     {
         // now actually delete the row metadata
@@ -65,7 +65,8 @@ fn after_delete(
         super::step_trigger_stmt(drop_clocks_stmt)?;
     }
 
-    tbl_info.set_cl(key, cl);
+    // Not cached: a cl cached here could outlive a rollback of this write.
+    tbl_info.invalidate_cl(key);
 
     Ok(ResultCode::OK)
 }

@@ -81,7 +81,7 @@ fn after_update(
     let mut changed = false;
     // Changing a primary key column to a new value is the same thing as deleting the row
     // previously identified by the primary key.
-    let cl_info = {
+    let changed_old_key = {
         if crate::compare_values::any_value_changed(pks_new, pks_old)? {
             let old_key = tbl_info
                 .get_or_create_key_via_raw_values(db, pks_old)
@@ -89,8 +89,7 @@ fn after_update(
             let next_seq = super::bump_seq(ext_data);
             changed = true;
             // Record the delete of the row identified by the old primary keys
-            let cl =
-                super::mark_locally_deleted(db, tbl_info, old_key, next_db_version, next_seq, &ts)?;
+            super::mark_locally_deleted(db, tbl_info, old_key, next_db_version, next_seq, &ts)?;
             let next_seq = super::bump_seq(ext_data);
             // todo: we don't need to this, if there's no existing row (cl is assumed to be 1).
             super::mark_new_pk_row_created(db, tbl_info, new_key, next_db_version, next_seq, &ts)?;
@@ -107,7 +106,7 @@ fn after_update(
                     next_seq,
                 )?;
             }
-            Some((old_key, cl))
+            Some(old_key)
         } else {
             None
         }
@@ -142,8 +141,12 @@ fn after_update(
         crate::db_version::next_db_version(db, ext_data)?;
     }
 
-    if let Some((old_key, cl)) = cl_info {
-        tbl_info.set_cl(old_key, cl);
+    // A primary key change deletes the old key and (re)creates the new one,
+    // changing both causal lengths. Neither is cached: a cl cached here could
+    // outlive a rollback of this write.
+    if let Some(old_key) = changed_old_key {
+        tbl_info.invalidate_cl(old_key);
+        tbl_info.invalidate_cl(new_key);
     }
 
     Ok(ResultCode::OK)

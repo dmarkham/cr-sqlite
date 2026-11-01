@@ -47,26 +47,21 @@ fn after_insert(
         .get_or_create_key_for_insert(db, pks_new)
         .map_err(|_| "failed getting or creating lookaside key")?;
 
-    let cl = if tbl_info.non_pks.is_empty() {
+    if tbl_info.non_pks.is_empty() {
         let seq = bump_seq(ext_data);
         // just a sentinel record
-        let cl = super::mark_new_pk_row_created(db, tbl_info, key_new, db_version, seq, &ts)?;
-        Some(cl)
+        super::mark_new_pk_row_created(db, tbl_info, key_new, db_version, seq, &ts)?;
     } else {
-        let cl = if create_record_existed {
+        if create_record_existed {
             // update the create record since it already exists.
             let seq = bump_seq(ext_data);
-            update_create_record(db, tbl_info, key_new, db_version, seq, &ts)?
-        } else {
-            None
-        };
+            update_create_record(db, tbl_info, key_new, db_version, seq, &ts)?;
+        }
         super::mark_locally_inserted(db, ext_data, tbl_info, key_new, db_version, &ts)?;
-        cl
-    };
-
-    if let Some(cl) = cl {
-        tbl_info.set_cl(key_new, cl);
     }
+
+    // Not cached: a cl cached here could outlive a rollback of this write.
+    tbl_info.invalidate_cl(key_new);
 
     Ok(ResultCode::OK)
 }
