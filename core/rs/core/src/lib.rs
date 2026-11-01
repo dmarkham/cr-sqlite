@@ -1150,7 +1150,8 @@ unsafe extern "C" fn x_crsql_cache_pk_cl(
 
     let table_infos =
         mem::ManuallyDrop::new(Box::from_raw((*ext_data).tableInfos as *mut Vec<TableInfo>));
-    let table_info = table_infos.iter().find(|t| t.tbl_name == table_name);
+    let table_info =
+        tableinfo::find_table_info_index(&table_infos, table_name).map(|i| &table_infos[i]);
 
     if let Some(table_info) = table_info {
         let cl = table_info.get_cl(pk_key).cloned().unwrap_or(-1);
