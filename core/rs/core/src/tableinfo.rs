@@ -725,6 +725,8 @@ impl TableInfo {
         stmt.take();
         let mut stmt = self.col_version_stmt.try_borrow_mut()?;
         stmt.take();
+        let mut stmt = self.col_site_id_stmt.try_borrow_mut()?;
+        stmt.take();
         let mut stmt = self.merge_pk_only_insert_stmt.try_borrow_mut()?;
         stmt.take();
         let mut stmt = self.merge_delete_stmt.try_borrow_mut()?;
