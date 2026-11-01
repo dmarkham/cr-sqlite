@@ -512,6 +512,20 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return init_failed_with_ext_data(db, ext_data);
     }
 
+    #[cfg(feature = "test")]
+    if let Err(_) = db.create_function_v2(
+        "crsql_test_mark_init_failed",
+        0,
+        sqlite::UTF8 | sqlite::DIRECTONLY,
+        Some(ext_data as *mut c_void),
+        Some(x_crsql_test_mark_init_failed),
+        None,
+        None,
+        None,
+    ) {
+        return init_failed_with_ext_data(db, ext_data);
+    }
+
     let rc = db
         .create_function_v2(
             "crsql_set_db_version",
@@ -704,6 +718,7 @@ const EXT_DATA_FUNCTIONS: &[(&str, c_int)] = &[
     ("crsql_cache_site_ordinal", 1),
     ("crsql_cache_pk_cl", 2),
     ("crsql_cache_db_version", 1),
+    ("crsql_test_mark_init_failed", 0),
     ("crsql_set_db_version", -1),
     ("crsql_get_ts", -1),
     ("crsql_commit_alter", -1),
@@ -1267,6 +1282,21 @@ unsafe extern "C" fn x_crsql_cache_db_version(
 /**
  * Return the timestamp for the current transaction.
  */
+/**
+ * Marks this connection's ext data as belonging to a failed init, as
+ * init_failed_with_ext_data does. Only used by tests of what a connection
+ * left with functions SQLite refused to drop does.
+ */
+#[cfg(feature = "test")]
+unsafe extern "C" fn x_crsql_test_mark_init_failed(
+    ctx: *mut sqlite::context,
+    _argc: i32,
+    _argv: *mut *mut sqlite::value,
+) {
+    crsql_mark_init_failed(ctx.user_data());
+    ctx.result_text_static("OK");
+}
+
 unsafe extern "C" fn x_crsql_get_ts(
     ctx: *mut sqlite::context,
     _argc: i32,

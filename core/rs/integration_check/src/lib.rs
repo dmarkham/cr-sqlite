@@ -21,6 +21,8 @@ pub extern "C" fn crsql_integration_check() {
     t::backfill::run_suite().expect("backfill suite");
     println!("Running fract");
     t::fract::run_suite();
+    println!("Running init_failed");
+    t::init_failed::run_suite().expect("init failed suite");
     println!("Running pack_columns");
     t::pack_columns::run_suite().expect("pack columns suite");
     println!("Running pk_only_tables");
