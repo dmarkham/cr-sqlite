@@ -26,7 +26,7 @@ pub fn key_between(a: Option<&str>, b: Option<&str>) -> Result<Option<String>, &
     match (&a, &b) {
         (None, None) => return Ok(Some(String::from(INTEGER_ZERO))),
         (Some(a), Some(b)) => {
-            if a > b {
+            if a >= b {
                 return Err("key_between - a must be before b");
             }
 
@@ -87,10 +87,7 @@ fn midpoint(a: &str, b: Option<&str>, digits: &str) -> Result<String, &'static s
     .transpose()?;
 
     let a_bytes = a.as_bytes();
-    let b_last_char = b.map(|b| {
-        let b_bytes = b.as_bytes();
-        b_bytes[b_bytes.len() - 1]
-    });
+    let b_last_char = b.and_then(|b| b.as_bytes().last().copied());
     if a_bytes.len() > 0 && a_bytes[a_bytes.len() - 1] == min_charcode
         || (b_last_char.map_or(false, |b| b == min_charcode))
     {
@@ -101,13 +98,18 @@ fn midpoint(a: &str, b: Option<&str>, digits: &str) -> Result<String, &'static s
         let mut n = 0;
         let b_bytes = b.as_bytes();
 
-        while (if n < a_bytes.len() {
-            a_bytes[n]
-        } else {
-            min_charcode
-        } == b_bytes[n])
+        while n < b_bytes.len()
+            && (if n < a_bytes.len() {
+                a_bytes[n]
+            } else {
+                min_charcode
+            } == b_bytes[n])
         {
             n += 1;
+        }
+        if n == b_bytes.len() {
+            // a is b, or b padded with spaces: nothing sorts between them.
+            return Err("midpoint - a must be before b");
         }
 
         if n > 0 {
@@ -135,7 +137,7 @@ fn midpoint(a: &str, b: Option<&str>, digits: &str) -> Result<String, &'static s
             None => Some(digits.len()),
         };
         if let Some(digit_b) = digit_b {
-            if digit_b - digit_a > 1 {
+            if digit_b > digit_a + 1 {
                 let mid_digit = round(0.5 * (digit_a + digit_b) as f64);
                 return Ok(String::from(&digits[mid_digit..mid_digit + 1]));
             } else {
@@ -168,6 +170,14 @@ fn round(d: f64) -> usize {
 }
 
 fn validate_order_key(key: &str) -> Result<(), &'static str> {
+    // Keys are made of BASE_95_DIGITS only. Checking that up front keeps all
+    // the byte indexing and slicing below on ASCII char boundaries.
+    if key.is_empty() {
+        return Err("Key is empty");
+    }
+    if !key.bytes().all(|c| c >= min_charcode && c <= b'~') {
+        return Err("Key contains characters outside of the base 95 digits");
+    }
     if key == SMALLEST_INTEGER {
         return Err("Key is too small");
     }
@@ -182,12 +192,12 @@ fn validate_order_key(key: &str) -> Result<(), &'static str> {
 }
 
 fn get_integer_part(key: &str) -> Result<&str, &'static str> {
-    // as_bytes is safe as we control the alphabet
-    let integer_part_len = get_integer_len(key.as_bytes()[0])?;
-    if integer_part_len > key.len() as u8 {
+    let head = *key.as_bytes().first().ok_or("Key is empty")?;
+    let integer_part_len = get_integer_len(head)? as usize;
+    if integer_part_len > key.len() {
         return Err("integer part of key is too long");
     }
-    return Ok(&key[0..integer_part_len as usize]);
+    return Ok(&key[0..integer_part_len]);
 }
 
 fn get_integer_len(head: u8) -> Result<u8, &'static str> {
@@ -202,7 +212,8 @@ fn get_integer_len(head: u8) -> Result<u8, &'static str> {
 }
 
 fn validate_integer(i: &str) -> Result<(), &'static str> {
-    if i.len() as u8 != get_integer_len(i.as_bytes()[0])? {
+    let head = *i.as_bytes().first().ok_or("invalid integer part of order key")?;
+    if i.len() != get_integer_len(head)? as usize {
         return Err("invalid integer part of order key");
     }
 
@@ -388,6 +399,26 @@ mod tests {
             Some("a0"),
             Err("key_between - a must be before b"),
         );
+        test(
+            Some("a0"),
+            Some("a0"),
+            Err("key_between - a must be before b"),
+        );
+        test(
+            Some("a0P"),
+            Some("a0P"),
+            Err("key_between - a must be before b"),
+        );
+        test(Some(""), None, Err("Key is empty"));
+        test(None, Some(""), Err("Key is empty"));
+        test(
+            Some("a\u{e9}"),
+            None,
+            Err("Key contains characters outside of the base 95 digits"),
+        );
+        let long = format!("a0{}", "P".repeat(254));
+        assert!(fractindex::key_between(Some(&long), None).unwrap().is_some());
+        assert!(fractindex::key_between(None, Some(&long)).unwrap().is_some());
     }
 
     #[test]
