@@ -18,6 +18,9 @@ void crsql_drop_last_db_versions_map(crsql_ExtData *pExtData);
 // The initialization here is incomplete! We need to call crsql_initSiteIdExt after this.
 crsql_ExtData *crsql_newExtData(sqlite3 *db) {
   crsql_ExtData *pExtData = sqlite3_malloc(sizeof *pExtData);
+  if (pExtData == 0) {
+    return 0;
+  }
 
   pExtData->siteId = 0;
   pExtData->pPragmaSchemaVersionStmt = 0;
@@ -78,7 +81,7 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db) {
   crsql_init_last_db_versions_map(pExtData);
   crsql_init_ordinal_map(pExtData);
 
-  sqlite3_stmt *pStmt;
+  sqlite3_stmt *pStmt = 0;
 
 
   rc += sqlite3_prepare_v2(db,
@@ -87,6 +90,7 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db) {
                            -1, &pStmt, 0);
 
   if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
     crsql_freeExtData(pExtData);
     return 0;
   }
