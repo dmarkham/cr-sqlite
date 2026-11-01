@@ -865,6 +865,10 @@ unsafe extern "C" fn x_crsql_commit_alter(
     let mut err_msg = null_mut();
     let db = ctx.db_handle();
 
+    // The schema_version alone can't tell this alteration apart from an earlier one that was
+    // rolled back to the same savepoint, so always re-pull the table infos.
+    (*ext_data).pragmaSchemaVersionForTableInfos = -1;
+
     let rc = if non_destructive {
         match pull_table_info(db, table_name, &mut err_msg as *mut _) {
             Ok(table_info) => {

@@ -219,12 +219,12 @@ int crsql_fetchPragmaSchemaVersion(sqlite3 *db, crsql_ExtData *pExtData,
     int version = sqlite3_column_int(pExtData->pPragmaSchemaVersionStmt, 0);
     sqlite3_reset(pExtData->pPragmaSchemaVersionStmt);
     if (which == DB_VERSION_SCHEMA_VERSION) {
-      if (version > pExtData->pragmaSchemaVersion) {
+      if (version != pExtData->pragmaSchemaVersion) {
         pExtData->pragmaSchemaVersion = version;
         return 1;
       }
     } else {
-      if (version > pExtData->pragmaSchemaVersionForTableInfos) {
+      if (version != pExtData->pragmaSchemaVersionForTableInfos) {
         pExtData->pragmaSchemaVersionForTableInfos = version;
         return 1;
       }

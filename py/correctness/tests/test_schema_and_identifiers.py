@@ -89,6 +89,22 @@ def test_rolled_back_alter_does_not_leave_stale_table_info():
     c.execute("INSERT INTO a VALUES (1, 1)")
     c.execute("UPDATE a SET x = 2 WHERE id = 1")
     assert c.execute("SELECT cid, val FROM crsql_changes").fetchall() == [('x', 2)]
+
+    # a later, unrelated schema change can take schema_version back to the number the
+    # rolled back alteration had; the table infos must still be re-pulled.
+    v0 = c.execute("PRAGMA schema_version").fetchone()[0]
+    c.execute("BEGIN")
+    c.execute("SELECT crsql_begin_alter('a')")
+    c.execute("ALTER TABLE a ADD COLUMN z")
+    c.execute("SELECT crsql_commit_alter('a')")
+    c.execute("INSERT INTO a VALUES (100, 1, 1)")
+    v1 = c.execute("PRAGMA schema_version").fetchone()[0]
+    c.execute("ROLLBACK")
+    for i in range(v1 - v0):
+        c.execute(f"CREATE TABLE junk{i} (x)")
+    assert c.execute("PRAGMA schema_version").fetchone()[0] == v1
+    c.execute("UPDATE a SET x = 3 WHERE id = 1")
+    assert c.execute("SELECT cid, val FROM crsql_changes").fetchall() == [('x', 3)]
     close(c)
 
 

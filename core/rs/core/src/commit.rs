@@ -29,6 +29,10 @@ pub unsafe extern "C" fn crsql_commit_hook(user_data: *mut c_void) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn crsql_rollback_hook(user_data: *mut c_void) {
     let ext_data = user_data as *mut crsql_ExtData;
+    // A rolled back schema change takes `PRAGMA schema_version` back to an earlier value that a
+    // later schema change in a new transaction can reach again. Forget the version the table
+    // infos were loaded at so they are re-pulled rather than matched against a reused number.
+    (*ext_data).pragmaSchemaVersionForTableInfos = -1;
     commit_or_rollback_reset(ext_data);
     // The rollback may have undone writes whose effect is cached in ExtData
     // (e.g. crsql_config_set). Forget the cached data version so the next
