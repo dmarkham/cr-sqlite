@@ -243,14 +243,14 @@ pub fn create_clock_table(
     db.exec_safe(
         &format!(
         "CREATE TABLE IF NOT EXISTS \"{table_name}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY, {pk_list})",
-        table_name = table_name,
+        table_name = crate::util::escape_ident(table_name),
         pk_list = pk_list,
         )
     )?;
     db.exec_safe(
         &format!(
         "CREATE UNIQUE INDEX IF NOT EXISTS \"{table_name}__crsql_pks_pks\" ON \"{table_name}__crsql_pks\" ({pk_list})",
-        table_name = table_name,
+        table_name = crate::util::escape_ident(table_name),
         pk_list = pk_list
         )
     )

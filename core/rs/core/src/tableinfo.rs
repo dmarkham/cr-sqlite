@@ -969,11 +969,13 @@ pub fn pull_table_info(
     table: &str,
     err: *mut *mut c_char,
 ) -> Result<TableInfo, ResultCode> {
-    let sql = format!("SELECT count(*) FROM pragma_table_info('{table}')");
-    let columns_len = match db.prepare_v2(&sql).and_then(|stmt| {
-        stmt.step()?;
-        stmt.column_int(0).to_usize().ok_or(ResultCode::ERROR)
-    }) {
+    let columns_len = match db
+        .prepare_v2("SELECT count(*) FROM pragma_table_info(?)")
+        .and_then(|stmt| {
+            stmt.bind_text(1, table, sqlite::Destructor::STATIC)?;
+            stmt.step()?;
+            stmt.column_int(0).to_usize().ok_or(ResultCode::ERROR)
+        }) {
         Ok(count) => count,
         Err(code) => {
             err.set(&format!("Failed to find columns for crr -- {table}"));
@@ -981,13 +983,12 @@ pub fn pull_table_info(
         }
     };
 
-    let sql = format!(
-        "SELECT \"cid\", \"name\", \"pk\"
-         FROM pragma_table_info('{table}') ORDER BY cid ASC"
-    );
-    let column_infos = match db.prepare_v2(&sql) {
+    let sql = "SELECT \"cid\", \"name\", \"pk\"
+         FROM pragma_table_info(?) ORDER BY cid ASC";
+    let column_infos = match db.prepare_v2(sql) {
         Ok(stmt) => {
             let mut cols: Vec<ColumnInfo> = vec![];
+            stmt.bind_text(1, table, sqlite::Destructor::STATIC)?;
 
             while stmt.step()? == ResultCode::ROW {
                 cols.push(ColumnInfo {
@@ -1050,9 +1051,10 @@ pub fn is_table_compatible(
     table: &str,
     err: *mut *mut c_char,
 ) -> Result<bool, ResultCode> {
+    let table_val = crate::util::escape_ident_as_value(table);
     // No unique indices besides primary key
     if db.count(&format!(
-        "SELECT count(*) FROM pragma_index_list('{table}')
+        "SELECT count(*) FROM pragma_index_list('{table_val}')
             WHERE \"origin\" != 'pk' AND \"unique\" = 1"
     ))? != 0
     {
@@ -1068,7 +1070,7 @@ pub fn is_table_compatible(
         // pragma_index_list does not include primary keys that alias rowid...
         // hence why we cannot use
         // `select * from pragma_index_list where origin = pk`
-        "SELECT count(*) FROM pragma_table_info('{table}')
+        "SELECT count(*) FROM pragma_table_info('{table_val}')
         WHERE \"pk\" > 0 AND \"notnull\" > 0"
     ))?;
     if valid_pks == 0 {
@@ -1081,7 +1083,7 @@ pub fn is_table_compatible(
 
     // All primary keys have to be non-nullable
     if db.count(&format!(
-        "SELECT count(*) FROM pragma_table_info('{table}') WHERE \"pk\" > 0"
+        "SELECT count(*) FROM pragma_table_info('{table_val}') WHERE \"pk\" > 0"
     ))? != valid_pks
     {
         err.set(&format!(
@@ -1109,7 +1111,7 @@ pub fn is_table_compatible(
 
     // No checked foreign key constraints
     if db.count(&format!(
-        "SELECT count(*) FROM pragma_foreign_key_list('{table}')"
+        "SELECT count(*) FROM pragma_foreign_key_list('{table_val}')"
     ))? != 0
     {
         err.set(&format!(
@@ -1123,7 +1125,7 @@ pub fn is_table_compatible(
 
     // Check for default value or nullable
     if db.count(&format!(
-        "SELECT count(*) FROM pragma_table_xinfo('{table}')
+        "SELECT count(*) FROM pragma_table_xinfo('{table_val}')
         WHERE \"notnull\" = 1 AND \"dflt_value\" IS NULL AND \"pk\" = 0"
     ))? != 0
     {

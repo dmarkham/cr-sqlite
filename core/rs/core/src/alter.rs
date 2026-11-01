@@ -119,7 +119,7 @@ unsafe fn compact_post_alter(
             sql.push_str(&format!(
                 "\"{tbl_name}\".\"{col_name}\" = \"{tbl_name}__crsql_pks\".\"{col_name}\"",
                 tbl_name = crate::util::escape_ident(tbl_name_str),
-                col_name = &col.name,
+                col_name = crate::util::escape_ident(&col.name),
             ));
         }
         sql.push_str(
