@@ -576,7 +576,9 @@ pub extern "C" fn crsql_changes_release(_vtab: *mut sqlite::vtab, _n: c_int) -> 
     ResultCode::OK as c_int
 }
 
-// clear ordinal cache on rollback so we don't have wrong data in the cache.
+// Clear the merge caches on rollback so we don't have wrong data in them.
+// SQLite also calls this when a statement that wrote to crsql_changes fails
+// inside an open transaction, so it covers statement rollbacks too.
 #[no_mangle]
 pub extern "C" fn crsql_changes_rollback_to(vtab: *mut sqlite::vtab, _: c_int) -> c_int {
     let tab = vtab.cast::<crsql_Changes_vtab>();
@@ -595,6 +597,16 @@ pub extern "C" fn crsql_changes_rollback_to(vtab: *mut sqlite::vtab, _: c_int) -
     for tbl_info in table_infos.iter_mut() {
         tbl_info.clear_cl_cache();
     }
+
+    // insert_db_version skips the crsql_db_versions write when this cache
+    // already holds a version >= the incoming one, so it must not remember
+    // versions whose writes were rolled back.
+    let mut last_db_versions = unsafe {
+        mem::ManuallyDrop::new(Box::from_raw(
+            (*(*tab).pExtData).lastDbVersions as *mut BTreeMap<Vec<u8>, i64>,
+        ))
+    };
+    last_db_versions.clear();
 
     ordinals.clear();
     ResultCode::OK as c_int
