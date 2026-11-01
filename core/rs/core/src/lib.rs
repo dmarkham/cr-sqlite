@@ -204,6 +204,9 @@ pub extern "C" fn sqlite3_crsqlcore_init(
     }
 
     let sync_bit_ptr = sqlite::malloc(mem::size_of::<c_int>()) as *mut c_int;
+    if sync_bit_ptr.is_null() {
+        return init_failed(db, false);
+    }
     unsafe {
         *sync_bit_ptr = 0;
     }
@@ -294,6 +297,9 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 
     let site_id_buffer =
         sqlite::malloc((consts::SITE_ID_LEN as usize) * mem::size_of::<*const c_char>());
+    if site_id_buffer.is_null() {
+        return init_failed(db, true);
+    }
     let rc = crate::bootstrap::crsql_init_site_id(db, site_id_buffer);
     if rc != ResultCode::OK as c_int {
         sqlite::free(site_id_buffer as *mut c_void);
@@ -860,6 +866,8 @@ unsafe extern "C" fn x_crsql_as_crr(
     if rc != ResultCode::OK as c_int {
         sqlite::result_error(ctx, err_msg, -1);
         sqlite::result_error_code(ctx, rc);
+        // result_error copied the message.
+        sqlite::free(err_msg as *mut c_void);
         let _ = db.exec_safe("ROLLBACK TO as_crr; RELEASE as_crr;");
         return;
     }
@@ -1006,7 +1014,9 @@ unsafe extern "C" fn x_crsql_commit_alter(
     };
     if rc != ResultCode::OK as c_int {
         let error_str = if !err_msg.is_null() {
-            unsafe { CStr::from_ptr(err_msg).to_string_lossy() }
+            let msg = unsafe { CStr::from_ptr(err_msg).to_string_lossy().into_owned() };
+            sqlite::free(err_msg as *mut c_void);
+            Cow::Owned(msg)
         } else {
             // nothing more specific was recorded, fall back to the connection's last error
             Cow::Owned(format!(
