@@ -385,7 +385,8 @@ def test_build_config():
 
     with open(os.path.join(CORE, "rs", "bundle", "src", "lib.rs")) as f:
         lib = f.read()
-    assert re.search(r"use (core|alloc)::alloc::Layout;", lib)
+    # The obsolete wasm alloc error handler used Layout without importing it.
+    assert "Layout" not in lib or re.search(r"use (core|alloc)::alloc::Layout;", lib)
 
     out = subprocess.run(["nm", "-D", "--defined-only", SO],
                          capture_output=True, text=True, check=True).stdout

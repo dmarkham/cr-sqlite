@@ -67,6 +67,12 @@ rs_build_flags=-Zbuild-std
 sysroot_option=--sysroot=$(NDK)/toolchains/llvm/prebuilt/$(NDK_HOSTARCH)/sysroot
 endif
 
+# ELF loadable extensions export only the SQLite entry point; without this
+# every C helper and Rust symbol (allocator shim included) is exported.
+ifeq ($(LOADABLE_EXTENSION),so)
+LOADABLE_LDFLAGS=-Wl,--version-script=src/loadable.map
+endif
+
 prefix=./dist
 dbg_prefix=./dbg
 bundle=bundle_static
@@ -178,7 +184,7 @@ $(sqlite3.c):
 
 $(rs_lib_dbg_static_cpy): export CRSQLITE_COMMIT_SHA = $(shell git rev-parse HEAD)
 $(rs_lib_dbg_static_cpy): FORCE $(dbg_prefix)
-	cd ./rs/$(bundle) && cargo rustc $(RS_TARGET) --features static,omit_load_extension$(libsql_feature) $(rs_build_flags)
+	cd ./rs/$(bundle) && cargo rustc $(RS_TARGET) --features static,omit_load_extension$(libsql_feature)$(rs_extra_features) $(rs_build_flags)
 	cp $(rs_lib_dbg_static) $(rs_lib_dbg_static_cpy)
 
 $(rs_lib_static_cpy): export CRSQLITE_COMMIT_SHA = $(shell git rev-parse HEAD)
@@ -197,19 +203,19 @@ $(rs_lib_dbg_loadable_cpy): FORCE $(dbg_prefix)
 	cp $(rs_lib_dbg_loadable) $(rs_lib_dbg_loadable_cpy)
 
 # Build the loadable extension.
-$(TARGET_LOADABLE): $(prefix) $(ext_files) $(sqlite3.c) $(rs_lib_loadable_cpy)
+$(TARGET_LOADABLE): $(prefix) $(ext_files) $(sqlite3.c) $(rs_lib_loadable_cpy) src/loadable.map
 	$(CC) -O2 -I./src/ -I$(sqlite_src) \
 	$(LOADABLE_CFLAGS) \
 	$(C_TARGET) \
 	$(sysroot_option) \
-	$(ext_files) $(rs_lib_loadable_cpy) -o $@
+	$(ext_files) $(rs_lib_loadable_cpy) $(LOADABLE_LDFLAGS) -o $@
 
-$(TARGET_DBG_LOADABLE): $(dbg_prefix) $(ext_files) $(sqlite3.c) $(rs_lib_dbg_loadable_cpy)
+$(TARGET_DBG_LOADABLE): $(dbg_prefix) $(ext_files) $(sqlite3.c) $(rs_lib_dbg_loadable_cpy) src/loadable.map
 	$(CC) -g -I./src/ -I$(sqlite_src) \
 	$(LOADABLE_CFLAGS) \
 	$(C_TARGET) \
 	$(sysroot_option) \
-	$(ext_files) $(rs_lib_dbg_loadable_cpy) -o $@
+	$(ext_files) $(rs_lib_dbg_loadable_cpy) $(LOADABLE_LDFLAGS) -o $@
 
 # Build a SQLite CLI that pre-loads cr-sqlite.
 # Useful for debugging.
