@@ -226,6 +226,37 @@ fn set_winner_clock(
     Ok(rowid)
 }
 
+/**
+ * Runs `f` with the sync bit set so the crr triggers ignore the writes `f` makes.
+ * The bit is per-connection and nothing else clears it, so it is cleared again whether
+ * or not `f` (or setting the bit) succeeded. `f`'s error wins over a clear error.
+ */
+unsafe fn with_sync_bit<T>(
+    ext_data: *mut crsql_ExtData,
+    f: impl FnOnce() -> Result<T, ResultCode>,
+) -> Result<T, ResultCode> {
+    let set_rc = (*ext_data)
+        .pSetSyncBitStmt
+        .step()
+        .and_then(|_| (*ext_data).pSetSyncBitStmt.reset());
+    let rc = set_rc.and_then(|_| f());
+    let clear_rc = (*ext_data).pClearSyncBitStmt.step();
+    let clear_reset_rc = (*ext_data).pClearSyncBitStmt.reset();
+    let ret = rc?;
+    clear_rc?;
+    clear_reset_rc?;
+    Ok(ret)
+}
+
+/// Steps a merge statement and resets it, returning the step's error if there was one.
+fn step_and_reset(stmt: &sqlite::ManagedStmt) -> Result<ResultCode, ResultCode> {
+    let rc = stmt.step();
+    let reset_rc = reset_cached_stmt(stmt.stmt);
+    let rc = rc?;
+    reset_rc?;
+    Ok(rc)
+}
+
 fn merge_sentinel_only_insert(
     db: *mut sqlite3,
     ext_data: *mut crsql_ExtData,
@@ -246,46 +277,21 @@ fn merge_sentinel_only_insert(
         reset_cached_stmt(merge_stmt.stmt)?;
         return Err(rc);
     }
-    let rc = unsafe {
-        (*ext_data)
-            .pSetSyncBitStmt
-            .step()
-            .and_then(|_| merge_stmt.step())
-    };
+    unsafe { with_sync_bit(ext_data, || step_and_reset(merge_stmt))? };
 
-    unsafe { (*ext_data).pSetSyncBitStmt.reset()? };
-    reset_cached_stmt(merge_stmt.stmt)?;
-
-    let sync_rc = unsafe {
-        let rc = (*ext_data).pClearSyncBitStmt.step();
-        (*ext_data).pClearSyncBitStmt.reset()?;
-        rc
-    };
-
-    if let Err(sync_rc) = sync_rc {
-        return Err(sync_rc);
-    }
-    if let Err(rc) = rc {
-        return Err(rc);
-    }
-
-    if rc.is_ok() {
-        zero_clocks_on_resurrect(db, tbl_info, key)?;
-        return set_winner_clock(
-            db,
-            ext_data,
-            tbl_info,
-            key,
-            crate::c::INSERT_SENTINEL,
-            remote_col_vrsn,
-            remote_db_vsn,
-            remote_site_id,
-            remote_seq,
-            remote_ts,
-        );
-    }
-
-    Ok(-1)
+    zero_clocks_on_resurrect(db, tbl_info, key)?;
+    set_winner_clock(
+        db,
+        ext_data,
+        tbl_info,
+        key,
+        crate::c::INSERT_SENTINEL,
+        remote_col_vrsn,
+        remote_db_vsn,
+        remote_site_id,
+        remote_seq,
+        remote_ts,
+    )
 }
 
 fn zero_clocks_on_resurrect(
@@ -320,23 +326,7 @@ unsafe fn merge_delete(
         reset_cached_stmt(delete_stmt.stmt)?;
         return Err(rc);
     }
-    let rc = (*ext_data)
-        .pSetSyncBitStmt
-        .step()
-        .and_then(|_| delete_stmt.step());
-
-    (*ext_data).pSetSyncBitStmt.reset()?;
-    reset_cached_stmt(delete_stmt.stmt)?;
-
-    let sync_rc = (*ext_data).pClearSyncBitStmt.step();
-
-    (*ext_data).pClearSyncBitStmt.reset()?;
-    if let Err(sync_rc) = sync_rc {
-        return Err(sync_rc);
-    }
-    if let Err(rc) = rc {
-        return Err(rc);
-    }
+    with_sync_bit(ext_data, || step_and_reset(delete_stmt))?;
 
     let ret = set_winner_clock(
         db,
@@ -676,21 +666,7 @@ unsafe fn merge_insert(
             return Err(rc);
         }
 
-        let rc = (*(*tab).pExtData)
-            .pSetSyncBitStmt
-            .step()
-            .and_then(|_| (*(*tab).pExtData).pSetSyncBitStmt.reset())
-            .and_then(|_| merge_stmt.step());
-
-        reset_cached_stmt(merge_stmt.stmt)?;
-
-        let sync_rc = (*(*tab).pExtData)
-            .pClearSyncBitStmt
-            .step()
-            .and_then(|_| (*(*tab).pExtData).pClearSyncBitStmt.reset());
-
-        rc?;
-        sync_rc?;
+        with_sync_bit((*tab).pExtData, || step_and_reset(merge_stmt))?;
 
         let merge_result = set_winner_clock(
             db,
